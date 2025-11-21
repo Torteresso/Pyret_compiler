@@ -1,0 +1,4 @@
+Conseils pour le projet : compiler très souvent -> on commence par print hello world, on fait toutes les étapes (syntaxe, typage, etc...) jusqu'à pouvoir compiler et après seulement on rajoute des élements par exemple print (1 + 2)
+
+Pour le rapport : ne pas expliquer ce qu'il sait deja (les étapes etc..) juste ce qui va aider à lire le code (car il lit le rapport avant le code), ce dont on est fiers, etc...
+

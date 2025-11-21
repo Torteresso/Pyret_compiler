@@ -1,0 +1,23 @@
+print(1 == 1)
+print(1 == 2)
+print(1 <> 1)
+print(1 == "a")
+print(1 <> "a")
+print(nothing == nothing)
+print(nothing <> nothing)
+print("a" == "b")
+print("a" == "a")
+print("ab" == ("a" + "b"))
+print(empty == empty)
+print(empty <> empty)
+print(empty == link(1, empty))
+print(empty <> link(1, empty))
+print(link(1, empty) == link(1, empty))
+print(link(1, empty) <> link(1, empty))
+print(link(1, empty) == link(2, empty))
+print(link(1, empty) <> link(2, empty))
+print(link(1, empty) == link(2, link(3, empty)))
+print(link(1, empty) <> link(2, link(3, empty)))
+
+
+

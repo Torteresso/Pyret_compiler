@@ -1,8 +1,0 @@
-print(num-modulo(5, 2))
-print("\n")
-print(num-modulo(-5, 2))
-print("\n")
-print(num-modulo(5, -2))
-print("\n")
-print(num-modulo(-5, -2))
-print("\n")

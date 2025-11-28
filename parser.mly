@@ -1,8 +1,9 @@
 %{
-
+    open Ast
 %}
 
 %token EOF
+%token <int> CONST  
 
 %start file
 
@@ -11,6 +12,9 @@
 %%
 
 file:
-    EOF { [] }
+    e=expr*
+    EOF { e }
 ;
+expr:
+    | c=CONST                       { EConst c } 
 

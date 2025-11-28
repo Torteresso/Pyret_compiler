@@ -2,6 +2,7 @@
 
 open Format
 open Lexing
+open Ast
 
 (* Option de compilation, pour s'arrêter à l'issue du parser *)
 let parse_only = ref false
@@ -63,6 +64,8 @@ let () =
        le prochain token. *)
     let p = Parser.file Lexer.token buf in
     close_in f;
+
+    print_endline (show_file p);
 
     (* On s'arrête ici si on ne veut faire que le parsing *)
     if !parse_only then exit 0;

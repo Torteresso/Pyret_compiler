@@ -4,6 +4,7 @@
 
 %token EOF
 %token <int> CONST  
+%token <string> STRING  
 
 %start file
 
@@ -17,4 +18,5 @@ file:
 ;
 expr:
     | c=CONST                       { EConst c } 
+    | s=STRING                      { EString s}
 

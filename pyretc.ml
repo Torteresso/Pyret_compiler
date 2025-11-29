@@ -76,15 +76,15 @@ let () =
        cible ofile. *)
     (*Compile.compile_program p !ofile*)
   with
-  | Lexer.Lexing_error c ->
+  | Lexer.Lexing_error s ->
       (* Erreur lexicale. On récupère sa position absolue et
 	   on la convertit en numéro de ligne *)
       localisation (Lexing.lexeme_start_p buf);
-      eprintf "Erreur dans l'analyse lexicale: %c@." c;
+      eprintf "Lexical error : %s@." s;
       exit 1
   | Parser.Error ->
       (* Erreur syntaxique. On récupère sa position absolue et on la
 	   convertit en numéro de ligne *)
       localisation (Lexing.lexeme_start_p buf);
-      eprintf "Erreur dans l'analyse syntaxique@.";
+      eprintf "Syntax error@.";
       exit 1

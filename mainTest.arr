@@ -1,1 +1,3 @@
-    -3   
+"first"
+"second"
+"with\ttab"

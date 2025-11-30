@@ -1,3 +1,1 @@
-"first"
-"second"
-"with\ttab"
+3 and 3

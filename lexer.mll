@@ -3,6 +3,29 @@
 
     let charBuffer = Buffer.create 60
 
+    let kwd_tbl = 
+        ["and", AND;
+         "block", BLOCK;
+         "cases", CASES;
+         "else", ELSE;
+         "end", END;
+         "false", FALSE;
+         "for", FOR;
+         "from", FROM;
+         "fun", FUN;
+         "if", IF;
+         "lam", LAM;
+         "or", OR;
+         "true", TRUE;
+         "var", VAR;]
+    
+
+    let id_or_kwd =
+        let h = Hashtbl.create 17 in
+        List.iter (fun (s,t) -> Hashtbl.add h s t) kwd_tbl;
+        fun s ->
+        let s = String.lowercase_ascii s in (* la casse n'est pas significative *)
+        try Hashtbl.find h s with _ -> IDENT s
 
     exception Lexing_error of string
 }
@@ -18,7 +41,15 @@ rule token = parse
     | '\n'                          { Lexing.new_line lexbuf; token lexbuf }
     | "#|"                          { comment lexbuf; token lexbuf}
     | eof                           { EOF }
+    | '<'                           { INF }
+    | '>'                           { SUP }
+    | '+'                           { ADD }
+    | '-'                           { SUB }
+    | '*'                           { MUL }
+    | '/'                           { DIV }
+    | '='                           { EQ }
     | integer as i                  { CONST (int_of_string i) }
+    | ident as i                    { id_or_kwd i}
     | '\'' as c | '"' as c          { Buffer.reset charBuffer; string c lexbuf }
     | _ as c                        { raise (Lexing_error ("The caracter " 
                                                             ^ String.make 1 c 

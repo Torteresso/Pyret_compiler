@@ -51,6 +51,8 @@ rule token = parse
     | '\n'                          { Lexing.new_line lexbuf; token lexbuf }
     | "#|"                          { comment lexbuf; token lexbuf}
     | eof                           { EOF }
+    | '('                           { LEFTPAR }
+    | ')'                           { RIGHTPAR }
     | space (op as b)               { binop lexbuf; CharMap.find b binopMap }
     | integer as i                  { CONST (int_of_string i) }
     | ident as i                    { idOrKwd i}

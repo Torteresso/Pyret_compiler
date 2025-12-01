@@ -21,9 +21,11 @@ type expr =
   | EString of string
   | EVar of ident
   | EBexpr of bexpr
+  | EBlock of block
 [@@deriving show]
 
 and bexpr = expr * (binop * expr) list [@@deriving show]
+and stmt = SBexpr of bexpr [@@deriving show]
+and block = stmt list [@@deriving show]
 
-type stmt = SBexpr of bexpr [@@deriving show]
 type file = stmt list [@@deriving show]

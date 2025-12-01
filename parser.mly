@@ -12,10 +12,10 @@
 %token <int> CONST  
 %token <string> STRING  
 %token <string> IDENT
-%token AND OR TRUE FALSE IF ELSE
+%token TRUE FALSE IF ELSE
 %token FOR FROM BLOCK CASES END
 %token LAM FUN VAR
-%token ADD SUB MUL DIV EQ INF SUP
+%token ADD SUB MUL DIV EQ INF SUP EQEQ INFEQ SUPEQ DIF AND OR
 %token LEFTPAR RIGHTPAR
 
 %start file
@@ -51,9 +51,9 @@ expr:
     | DIV                           { Div } 
     | AND                           { And } 
     | OR                            { Or } 
-    | EQ EQ                         { Eq }  
+    | EQEQ                          { Eq }  
     | INF                           { Inf } 
-    | INF EQ                        { InfEq } 
+    | INFEQ                         { InfEq } 
     | SUP                           { Sup } 
-    | SUP EQ                        { SupEq } 
-    | INF SUP                       { Dif } 
+    | SUPEQ                         { SupEq } 
+    | DIF                           { Dif } 

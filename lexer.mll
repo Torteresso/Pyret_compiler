@@ -4,8 +4,7 @@
     let charBuffer = Buffer.create 60
 
     let kwdTbl = 
-        ["and", AND;
-         "block", BLOCK;
+        ["block", BLOCK;
          "cases", CASES;
          "else", ELSE;
          "end", END;
@@ -15,19 +14,24 @@
          "fun", FUN;
          "if", IF;
          "lam", LAM;
-         "or", OR;
          "true", TRUE;
          "var", VAR;]
 
-    module CharMap = Map.Make(Char)
-    let binopMap = CharMap.of_seq @@ List.to_seq  
-        ['<', INF;
-         '>', SUP;
-         '+', ADD;
-         '-', SUB;
-         '*', MUL;
-         '/', DIV;
-         '=', EQ]
+    module StringMap = Map.Make(String)
+    let binopMap = StringMap.of_seq @@ List.to_seq  
+        ["<", INF;
+         ">", SUP;
+         "+", ADD;
+         "-", SUB;
+         "*", MUL;
+         "/", DIV;
+         "==", EQEQ;
+         "<>", DIF;
+         "<=", INFEQ;
+         ">=", SUPEQ;
+         "and", AND;
+         "or", OR;
+        ]
 
     let idOrKwd =
         let h = Hashtbl.create 17 in
@@ -44,7 +48,7 @@ let digit = ['0'-'9']
 let letter = ['a'-'z' 'A'-'Z' '_']
 let ident = letter ('-'* (letter | digit)+)*
 let integer = ('-' | '+')? digit+
-let op = ['<' '>' '+' '-' '*' '/' '=']
+let op = ['<' '>' '+' '-' '*' '/'] | "==" | "<>" | "<=" | ">=" | "and" | "or"
 
 rule token = parse
     | space+                        { token lexbuf}  
@@ -53,7 +57,7 @@ rule token = parse
     | eof                           { EOF }
     | '('                           { LEFTPAR }
     | ')'                           { RIGHTPAR }
-    | space (op as b)               { binop lexbuf; CharMap.find b binopMap }
+    | space (op as b)               { binop lexbuf; StringMap.find b binopMap }
     | integer as i                  { CONST (int_of_string i) }
     | ident as i                    { idOrKwd i}
     | '\'' as c | '"' as c          { Buffer.reset charBuffer; string c lexbuf }

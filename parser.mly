@@ -31,8 +31,11 @@ file:
 stmt:
     | be=bexpr                      { SBexpr be }
 
+block:
+    s=stmt+                         { s }   
+
 bexpr: 
-    e=expr be=binopExpr*           { if checkBinopExpr be then (e, be)
+    e=expr be=binopExpr*            { if checkBinopExpr be then (e, be)
                                      else raise (Parsing_error "Cannot chain different binop operators")}
 
 binopExpr:
@@ -43,6 +46,7 @@ expr:
     | s=STRING                      { EString s }
     | i=IDENT                       { EVar i }
     | LEFTPAR be=bexpr RIGHTPAR     { EBexpr be }
+    | BLOCK b=block END             { EBlock b }
 
 %inline binop:
     | ADD                           { Add } 

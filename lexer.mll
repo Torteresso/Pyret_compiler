@@ -4,8 +4,7 @@
     let charBuffer = Buffer.create 60
 
     let kwdTbl = 
-        ["block", BLOCK;
-         "cases", CASES;
+        ["cases", CASES;
          "else", ELSE;
          "end", END;
          "false", FALSE;
@@ -58,6 +57,7 @@ rule token = parse
     | '('                           { LEFTPAR }
     | ')'                           { RIGHTPAR }
     | space (op as b)               { binop lexbuf; StringMap.find b binopMap }
+    | "block:"                      { BLOCK }
     | integer as i                  { CONST (int_of_string i) }
     | ident as i                    { idOrKwd i}
     | '\'' as c | '"' as c          { Buffer.reset charBuffer; string c lexbuf }

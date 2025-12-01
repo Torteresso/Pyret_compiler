@@ -25,9 +25,9 @@ stmt:
     | be=bexpr                      { SBexpr be }
 
 bexpr: 
-    e=expr be=binop_expr*           { (e, be) }
+    e=expr be=binopExpr*           { (e, be) }
 
-binop_expr:
+binopExpr:
     op=binop e=expr                 { (op, e) }
 
 expr:

@@ -5,7 +5,7 @@ open Lexing
 open Ast
 
 (* Option de compilation, pour s'arrêter à l'issue du parser *)
-let parse_only = ref false
+let parseOnly = ref false
 
 (* Noms des fichiers source et cible *)
 let ifile = ref ""
@@ -16,7 +16,7 @@ let set_file f s = f := s
 let options =
   [
     ( "--parse-only",
-      Arg.Set parse_only,
+      Arg.Set parseOnly,
       "  Pour ne faire uniquement que la phase d'analyse syntaxique" );
     ( "-o",
       Arg.String (set_file ofile),
@@ -68,7 +68,7 @@ let () =
     print_endline (show_file p);
 
     (* On s'arrête ici si on ne veut faire que le parsing *)
-    if !parse_only then exit 0;
+    if !parseOnly then exit 0;
 
     assert false
     (* Compilation de l'arbre de syntaxe abstraite p. Le code machine

@@ -3,7 +3,7 @@
 
     let charBuffer = Buffer.create 60
 
-    let kwd_tbl = 
+    let kwdTbl = 
         ["and", AND;
          "block", BLOCK;
          "cases", CASES;
@@ -18,11 +18,20 @@
          "or", OR;
          "true", TRUE;
          "var", VAR;]
-    
 
-    let id_or_kwd =
+    module CharMap = Map.Make(Char)
+    let binopMap = CharMap.of_seq @@ List.to_seq  
+        ['<', INF;
+         '>', SUP;
+         '+', ADD;
+         '-', SUB;
+         '*', MUL;
+         '/', DIV;
+         '=', EQ]
+
+    let idOrKwd =
         let h = Hashtbl.create 17 in
-        List.iter (fun (s,t) -> Hashtbl.add h s t) kwd_tbl;
+        List.iter (fun (s,t) -> Hashtbl.add h s t) kwdTbl;
         fun s ->
         let s = String.lowercase_ascii s in (* la casse n'est pas significative *)
         try Hashtbl.find h s with _ -> IDENT s
@@ -35,25 +44,24 @@ let digit = ['0'-'9']
 let letter = ['a'-'z' 'A'-'Z' '_']
 let ident = letter ('-'* (letter | digit)+)*
 let integer = ('-' | '+')? digit+
+let op = ['<' '>' '+' '-' '*' '/' '=']
 
 rule token = parse
     | space+                        { token lexbuf}  
     | '\n'                          { Lexing.new_line lexbuf; token lexbuf }
     | "#|"                          { comment lexbuf; token lexbuf}
     | eof                           { EOF }
-    | '<'                           { INF }
-    | '>'                           { SUP }
-    | '+'                           { ADD }
-    | '-'                           { SUB }
-    | '*'                           { MUL }
-    | '/'                           { DIV }
-    | '='                           { EQ }
+    | space (op as b)               { binop lexbuf; CharMap.find b binopMap }
     | integer as i                  { CONST (int_of_string i) }
-    | ident as i                    { id_or_kwd i}
+    | ident as i                    { idOrKwd i}
     | '\'' as c | '"' as c          { Buffer.reset charBuffer; string c lexbuf }
     | _ as c                        { raise (Lexing_error ("The caracter " 
                                                             ^ String.make 1 c 
                                                             ^ " is not recognized"))}
+
+and binop = parse
+    | space                         { () }  
+    | _                             { raise (Lexing_error "A binop operator must be followed by a space")} 
 
 and comment = parse 
     | "|#"                          { () }

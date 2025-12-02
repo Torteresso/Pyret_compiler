@@ -58,6 +58,8 @@ rule token = parse
     | ')'                           { RIGHTPAR }
     | space (op as b)               { binop lexbuf; StringMap.find b binopMap }
     | "block:"                      { BLOCK }
+    | ':'                           { COLON }
+    | '='                           { EQ }
     | integer as i                  { CONST (int_of_string i) }
     | ident as i                    { idOrKwd i}
     | '\'' as c | '"' as c          { Buffer.reset charBuffer; string c lexbuf }

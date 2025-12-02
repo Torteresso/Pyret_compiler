@@ -25,7 +25,14 @@ type expr =
 [@@deriving show]
 
 and bexpr = expr * (binop * expr) list [@@deriving show]
-and stmt = SBexpr of bexpr [@@deriving show]
+
+and stmt =
+  | SBexpr of bexpr
+  | SAffec of ident * bexpr
+  | SVarDecl of ident * bexpr
+  | SDecl of ident * bexpr
+[@@deriving show]
+
 and block = stmt list [@@deriving show]
 
 type file = stmt list [@@deriving show]

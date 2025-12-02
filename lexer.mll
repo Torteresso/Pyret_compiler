@@ -35,11 +35,11 @@
     let idOrKwd =
         let h = Hashtbl.create 17 in
         List.iter (fun (s,t) -> Hashtbl.add h s t) kwdTbl;
-        fun s ->
-        let s = String.lowercase_ascii s in (* la casse n'est pas significative *)
-        try Hashtbl.find h s with _ -> IDENT s
+        fun s -> try Hashtbl.find h s with _ -> IDENT s
 
     exception Lexing_error of string
+
+    let binopError () = raise (Lexing_error "A binop operator must be followed by a space")
 }
 
 let space = [' ' '\t']
@@ -56,10 +56,13 @@ rule token = parse
     | eof                           { EOF }
     | '('                           { LEFTPAR }
     | ')'                           { RIGHTPAR }
-    | space (op as b)               { binop lexbuf; StringMap.find b binopMap }
+    | space+ (op as b)               { binop b lexbuf}
     | "block:"                      { BLOCK }
     | ':'                           { COLON }
     | '='                           { EQ }
+    | '<'                           { LEFTTYSYMBOL }
+    | '>'                           { RIGHTTYSYMBOL }
+    | ','                           { COMMA }
     | integer as i                  { CONST (int_of_string i) }
     | ident as i                    { idOrKwd i}
     | '\'' as c | '"' as c          { Buffer.reset charBuffer; string c lexbuf }
@@ -67,9 +70,10 @@ rule token = parse
                                                             ^ String.make 1 c 
                                                             ^ " is not recognized"))}
 
-and binop = parse
-    | space                         { () }  
-    | _                             { raise (Lexing_error "A binop operator must be followed by a space")} 
+and binop b = parse
+    | space                         { StringMap.find b binopMap  }  
+    | '>'                           { if b = "-" then ARROW else binopError ()}
+    | _                             { if b = "<" then LEFTTYSYMBOL else binopError ()} 
 
 and comment = parse 
     | "|#"                          { () }

@@ -30,6 +30,9 @@ type expr =
   | EBexpr of bexpr
   | EBlock of block
   | ELam of funbody
+  | ECall of ident * caller list
+  | ECases of ty * bexpr * branch list
+  | EIf of bexpr * block * (bexpr * block) list * block
 [@@deriving show]
 
 and bexpr = expr * (binop * expr) list [@@deriving show]
@@ -43,5 +46,7 @@ and stmt =
 
 and block = stmt list [@@deriving show]
 and funbody = param list * ty * block [@@deriving show]
+and caller = bexpr list [@@deriving show]
+and branch = ident * ident list option * block [@@deriving show]
 
 type file = stmt list [@@deriving show]

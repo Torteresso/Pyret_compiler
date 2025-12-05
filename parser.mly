@@ -14,17 +14,41 @@
                         | SBexpr _ | SAffec _ -> true 
                         | SDecl _ | SFun _ -> false)
         | _ :: l -> checkEndOfBlock l
+
+     let isValidColonBlock = function 
+        | [] -> raise (Parsing_error "A block must contain at least one statement") 
+        | b -> (if (List.fold_left (fun n s -> (
+                    (match s with 
+                        | SBexpr _ | SAffec _ -> (n + 1) 
+                        | SDecl _ | SFun _ -> n)
+                              )) 0 b) > 1 then false else true)
+
+
+    let defaultElse = [(SBexpr ((ECall ("raise", [[((EString "error"), [])]])), []))]
+
+    let getCorrectElse = function 
+        | None -> defaultElse
+        | Some x -> x
+
+    let checkIfExpr elif el = 
+        match elif with
+            | [] -> (match el with 
+                        | None -> raise (Parsing_error "An if-expression has only one branch")
+                        | Some _ -> ())
+            | _ :: _ -> ()
+
+
 %}
 
 %token EOF
 %token <int> CONST  
 %token <string> STRING  
 %token <string> IDENT
-%token TRUE FALSE IF ELSE
+%token TRUE FALSE IF ELSE ELSECOLON
 %token FOR FROM CASES END
 %token LAM FUN VAR
 %token ADD SUB MUL DIV EQ INF SUP EQEQ INFEQ SUPEQ DIF AND OR
-%token LEFTPAR RIGHTPAR
+%token SPACELEFTPAR LEFTPAR RIGHTPAR PIPE
 %token COLON BLOCK RIGHTTYSYMBOL LEFTTYSYMBOL COMMA ARROW
 
 %start file
@@ -52,10 +76,10 @@ stmt:
                                     { SFun (i, is, fb) }
 
 pIdent:
-     LEFTTYSYMBOL is=separated_list(COMMA, IDENT) pClosingSymbol 
+     anyInf is=separated_nonempty_list(COMMA, IDENT) pClosingSymbol 
                                     { is }
 funbody:    
-    | LEFTPAR ps=separated_list(COMMA, param) RIGHTPAR rt=rTy ublock b=block END
+    | LEFTPAR ps=separated_list(COMMA, param) RIGHTPAR rt=rTy b=ublock END
                                     { (ps, rt, b) }
 
 param:
@@ -67,10 +91,10 @@ varTy:
 ty:
     | i=IDENT ts=pTy? 
                                     { PType (i, ts) }
-    | LEFTPAR ts=separated_list(COMMA, ty) rt=rTy RIGHTPAR
+    | anyLeftPar ts=separated_list(COMMA, ty) rt=rTy RIGHTPAR
                                     { RType (ts, rt) }
 pTy: 
-     LEFTTYSYMBOL ts=separated_list(COMMA, ty) pClosingSymbol
+     anyInf ts=separated_nonempty_list(COMMA, ty) pClosingSymbol
                                     { ts }
 pClosingSymbol:
     | RIGHTTYSYMBOL                 { () }
@@ -80,6 +104,12 @@ rTy:
     ARROW t=ty                      { t }
 
 ublock:
+    | COLON b=block                 { if isValidColonBlock b then b
+                                      else raise (Parsing_error 
+                                      "A block introduced with ':' cannot contains more than one expression or affectation")}
+    | BLOCK b=block                 { b }
+
+ublockSymbols:
     | COLON                         { () }
     | BLOCK                         { () }
 
@@ -91,14 +121,54 @@ binopExpr:
     op=binop e=expr                 { (op, e) }
 
 expr:
+    | i=IDENT cs=caller+            { ECall (i, cs) }
     | c=CONST                       { EConst c } 
     | s=STRING                      { EString s }
     | i=IDENT                       { EVar i }
     | TRUE                          { EBool true }  
     | FALSE                         { EBool false }  
-    | LEFTPAR be=bexpr RIGHTPAR     { EBexpr be }
+    | anyLeftPar be=bexpr RIGHTPAR     { EBexpr be }
     | BLOCK b=block END             { EBlock b }
     | LAM fb=funbody                { ELam fb } 
+    | FOR i=IDENT anyLeftPar fs=separated_list(COMMA, from) 
+          RIGHTPAR rt=rTy b=ublock END
+                                    { let (p, e) = List.split fs in 
+                                    ECall(i, [[ELam (p, rt, b), []] @ e]) }
+    | CASES anyLeftPar t=ty RIGHTPAR be=bexpr ublockSymbols bs=branch* END
+                                    { ECases (t, be, bs) }
+    | IF be=bexpr b=ublock besB=elseIf* bElse=else_? END
+                                    { checkIfExpr besB bElse;
+                                      EIf (be, b, besB, getCorrectElse bElse) }
+        
+elseIf:
+    ELSE IF be=bexpr COLON b=block  { (be, b) }
+
+else_:
+    ELSECOLON b=block              { b }
+
+caller:
+    | LEFTPAR bes=separated_list(COMMA, bexpr) RIGHTPAR
+                                    { bes }
+
+branch:
+    | PIPE i=IDENT is=identList? EQ RIGHTTYSYMBOL b=block 
+                                    { (i, is, b) }
+
+identList:
+    | anyLeftPar is=separated_list(COMMA, IDENT) RIGHTPAR 
+                                    { is }
+
+from:
+    | p=param FROM be=bexpr         { (p, be) }
+
+anyLeftPar:
+    | LEFTPAR                       { () }
+    | SPACELEFTPAR                  { () }
+
+anyInf:
+    | INF                           { () }
+    | LEFTTYSYMBOL                  { () }
+
 
 %inline binop:
     | ADD                           { Add } 

@@ -19,7 +19,6 @@
     module StringMap = Map.Make(String)
     let binopMap = StringMap.of_seq @@ List.to_seq  
         ["<", [INF];
-         ">", [SUP];
          "+", [ADD];
          "-", [SUB];
          "*", [MUL];
@@ -53,7 +52,7 @@ let digit = ['0'-'9']
 let letter = ['a'-'z' 'A'-'Z' '_']
 let ident = letter ('-'* (letter | digit)+)*
 let integer = ('-' | '+')? digit+
-let op = ['<' '>' '+' '-' '*' '/'] | "==" | "<>" | "<=" | ">=" | "and" | "or"
+let op = ['<' '+' '-' '*' '/'] | "==" | "<>" | "<=" | ">=" | "and" | "or"
 
 rule token = parse
     | space+                        { token lexbuf}  
@@ -66,6 +65,7 @@ rule token = parse
     | '('                           { [LEFTPAR] }
     | ')'                           { [RIGHTPAR] }
     | space+ (op as b)              { binop b lexbuf}
+    | space+ '<'                    { sup lexbuf }
     | "block:"                      { [BLOCK] }
     | "else:"                       { [ELSECOLON] }
     | ':'                           { [COLON] }
@@ -88,6 +88,16 @@ and binop b = parse
     | _ as c                        { if b = "<" then
                                       ([LEFTTYSYMBOL] @ unterminatedIndent c lexbuf)
                                       else binopError ()} 
+
+and sup = parse
+    | space                         { [SUP] }
+    | '('                           { [RIGHTTYSYMBOL; LEFTPAR] }
+    | '='                           { [RIGHTTYSYMBOL; EQ] }
+    | "block:"                      { [RIGHTTYSYMBOL; BLOCK] }
+    | ':'                           { [RIGHTTYSYMBOL; COLON] }
+    | ','                           { [RIGHTTYSYMBOL; COMMA] }
+    | ')'                           { [RIGHTTYSYMBOL; RIGHTPAR] }
+    | "from"                        { [RIGHTTYSYMBOL; FROM] }
 
 and unterminatedIndent firstLetter = parse
     | ('-'* (letter | digit)+)* as i { idOrKwd ((String.make 1 firstLetter) ^ i) }

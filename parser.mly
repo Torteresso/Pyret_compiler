@@ -51,6 +51,9 @@
 %token SPACELEFTPAR LEFTPAR RIGHTPAR PIPE
 %token COLON BLOCK RIGHTTYSYMBOL LEFTTYSYMBOL COMMA ARROW
 
+%nonassoc IDENT
+%nonassoc LEFTPAR
+
 %start file
 
 %type <Ast.file> file
@@ -127,7 +130,7 @@ expr:
     | i=IDENT                       { EVar i }
     | TRUE                          { EBool true }  
     | FALSE                         { EBool false }  
-    | anyLeftPar be=bexpr RIGHTPAR     { EBexpr be }
+    | anyLeftPar be=bexpr RIGHTPAR  { EBexpr be }
     | BLOCK b=block END             { EBlock b }
     | LAM fb=funbody                { ELam fb } 
     | FOR i=IDENT anyLeftPar fs=separated_list(COMMA, from) 

@@ -3,7 +3,15 @@ exception Parsing_error of string
 type loc = { pos_fname : string; pos_lnum : int; pos_bol : int; pos_cnum : int }
 [@@deriving show]
 
-type typ = Number | Tvar of tvar [@@deriving show]
+let posToLoc (pos : Lexing.position) =
+  {
+    pos_fname = pos.pos_fname;
+    pos_lnum = pos.pos_lnum;
+    pos_bol = pos.pos_bol;
+    pos_cnum = pos.pos_cnum;
+  }
+
+type typ = Number | String | Tvar of tvar [@@deriving show]
 and tvar = { id : int; mutable def : typ option } [@@deriving show]
 
 type ident = string [@@deriving show]
@@ -30,9 +38,10 @@ type ty = PType of ident * ty list option | RType of ty list * ty
 
 type param = ident * ty [@@deriving show]
 
-type expr = { desc : desc; loc : loc; mutable typ : typ option }
+type expr = { edesc : exprDesc; eloc : loc; mutable etyp : typ option }
+[@@deriving show]
 
-and desc =
+and exprDesc =
   | EConst of int
   | EBool of bool
   | EString of string
@@ -46,8 +55,9 @@ and desc =
 [@@deriving show]
 
 and bexpr = expr * (binop * expr) list [@@deriving show]
+and stmt = { sdesc : stmtDesc; sloc : loc } [@@deriving show]
 
-and stmt =
+and stmtDesc =
   | SBexpr of bexpr
   | SAffec of ident * bexpr
   | SDecl of isVar * ident * ty option * bexpr

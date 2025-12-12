@@ -1,5 +1,7 @@
 open Ast
 
+exception Typer_error of loc * typ * typ
+
 module V = struct
   type t = tvar
 
@@ -14,18 +16,19 @@ module V = struct
 end
 
 let rec head = function Tvar { def = Some t } -> head t | t -> t
-let rec canon t = match head t with (Tvar _ | Number) as t -> t
+let rec canon t = match head t with (Tvar _ | Number | String) as t -> t
 
 exception UnificationFailure of typ * typ
 
 let unification_error t1 t2 = raise (UnificationFailure (canon t1, canon t2))
 
 let rec occur var t =
-  match head t with Tvar v -> V.equal v var | Number -> false
+  match head t with Tvar v -> V.equal v var | Number | String -> false
 
 let rec unify t1 t2 =
   match (head t1, head t2) with
   | Number, Number -> ()
+  | String, String -> ()
   | Tvar v1, Tvar v2 when V.equal v1 v2 -> ()
   | Tvar v, t -> if occur v t then unification_error t1 t2 else v.def <- Some t
   | t, Tvar v -> unify t2 t1
@@ -35,7 +38,7 @@ module Vset = Set.Make (V)
 
 let fvars t =
   let rec processType acc t =
-    match head t with Number -> acc | Tvar v -> Vset.add v acc
+    match head t with Number | String -> acc | Tvar v -> Vset.add v acc
   in
   processType Vset.empty t
 
@@ -75,23 +78,46 @@ let find s env =
   let rec processT t =
     match head t with
     | Number -> Number
+    | String -> Number
     | Tvar v1 as t -> ( try Vmap.find v1 v with Not_found -> t)
   in
   processT t
 
 let check p =
   let rec typeExpr env expr =
-    (match expr.desc with EConst i -> expr.typ <- Some Number);
+    (match expr.edesc with
+    | EConst i -> expr.etyp <- Some Number
+    | EString s -> expr.etyp <- Some String);
     expr
   in
-  let rec typeBexpr env = function
-    | e, [] -> SBexpr (typeExpr env e, [])
-    | e1, (op, e2) :: l -> (
-        match op with Add -> SBexpr (typeExpr env e1, []))
+  let rec typeBexpr env be =
+    let e, opE = be in
+    let typedE = typeExpr env e in
+    let previousType = ref (Option.get typedE.etyp) in
+    let typedOpE =
+      List.fold_right
+        (fun (op, e) l ->
+          let currentTypedE = typeExpr env e in
+          let currentType = Option.get currentTypedE.etyp in
+          (match op with
+          | Add -> (
+              match (!previousType, currentType) with
+              | Number, Number | String, String -> ()
+              | _ ->
+                  raise
+                    (Typer_error (currentTypedE.eloc, !previousType, currentType))
+              ));
+          previousType := currentType;
+          (op, currentTypedE) :: l)
+        opE []
+    in
+    SBexpr (typedE, typedOpE)
   in
   let rec typeStmt env f =
     List.fold_right
-      (fun s l -> match s with SBexpr be -> typeBexpr env be :: l)
+      (fun s l ->
+        match s.sdesc with
+        | SBexpr be -> { sdesc = typeBexpr env be; sloc = s.sloc } :: l)
       f []
   in
   typeStmt empty p

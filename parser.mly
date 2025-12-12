@@ -1,14 +1,11 @@
 %{
     open Ast
     
-    let posToLoc (pos : Lexing.position) = 
-        { pos_fname = pos.pos_fname; 
-          pos_lnum = pos.pos_lnum;
-          pos_bol = pos.pos_bol;
-          pos_cnum = pos.pos_cnum}
+    let exprWithLoc pos exprDesc =
+        { edesc = exprDesc; eloc = posToLoc pos; etyp=None }
 
-    let with_loc pos desc =
-        { desc; loc = posToLoc pos; typ=None }
+    let stmtWithLoc pos stmtDesc =
+        { sdesc = stmtDesc; sloc = posToLoc pos }
 
     let checkBinopExpr = function 
         | [] -> true
@@ -17,7 +14,7 @@
     let rec checkEndOfBlock = function 
         | [] -> raise (Parsing_error "A block must contain at least one statement") 
         | s :: [] -> 
-                    (match s with 
+                    (match s.sdesc with 
                         | SBexpr _ | SAffec _ -> true 
                         | SDecl _ | SFun _ -> false)
         | _ :: l -> checkEndOfBlock l
@@ -25,17 +22,17 @@
      let isValidColonBlock = function 
         | [] -> raise (Parsing_error "A block must contain at least one statement") 
         | b -> (if (List.fold_left (fun n s -> (
-                    (match s with 
+                    (match s.sdesc with 
                         | SBexpr _ | SAffec _ -> (n + 1) 
                         | SDecl _ | SFun _ -> n)
                               )) 0 b) > 1 then false else true)
 
 
     let defaultElse pos = 
-        let error_expr = with_loc pos (EString "error") in
-        let call_expr = with_loc pos (ECall ("raise", [[(error_expr, [])]])) in
+        let error_expr = exprWithLoc pos (EString "error") in
+        let call_expr = exprWithLoc pos (ECall ("raise", [[(error_expr, [])]])) in
         let bexpr = (call_expr, []) in
-        [SBexpr bexpr]
+        [stmtWithLoc pos (SBexpr bexpr)]
 
     let getCorrectElse pos = function 
         | None -> defaultElse pos
@@ -48,6 +45,13 @@
                         | Some _ -> ())
             | _ :: _ -> ()
 
+    let checkStmtSpacing stmtList = 
+        List.fold_left (fun l s -> 
+            let lineNumber = s.sloc.pos_lnum in     
+            if List.mem lineNumber l
+            then raise (Parsing_error ("Multiple statements on line " ^ string_of_int lineNumber ^ " is not allowed"))
+            else lineNumber :: l
+                       ) [] stmtList; ()          
    
 
 
@@ -76,21 +80,21 @@
 
 file:
     e=stmt*
-    EOF { e }
+    EOF { checkStmtSpacing e; e }
 
 block:
-    s=stmt+                         { if checkEndOfBlock s then s
+    s=stmt+                         { if checkEndOfBlock s then (checkStmtSpacing s; s)
                                       else raise (Parsing_error "A block must finish with an expression or affectation")}
 
 stmt:
-    | be=bexpr                      { SBexpr be }
-    | i=IDENT COLON EQ be=bexpr     { SAffec (i, be) }
+    | be=bexpr                      { stmtWithLoc $endpos (SBexpr be) }
+    | i=IDENT COLON EQ be=bexpr     { stmtWithLoc $endpos (SAffec (i, be)) }
     | VAR i=IDENT t=varTy? EQ be=bexpr       
-                                    { SDecl (true, i, t, be) }
+                                    { stmtWithLoc $endpos (SDecl (true, i, t, be)) }
     | i=IDENT t=varTy? EQ be=bexpr          
-                                    { SDecl (false, i, t, be) }
+                                    { stmtWithLoc $endpos (SDecl (false, i, t, be)) }
     | FUN i=IDENT is=pIdent? fb=funbody
-                                    { SFun (i, is, fb) }
+                                    { stmtWithLoc $endpos (SFun (i, is, fb)) }
 
 pIdent:
      anyInf is=separated_nonempty_list(COMMA, IDENT) pClosingSymbol 
@@ -138,24 +142,24 @@ binopExpr:
     op=binop e=expr                 { (op, e) }
 
 expr:
-    | i=IDENT cs=caller+            { with_loc $endpos (ECall (i, cs)) }
-    | c=CONST                       { with_loc $endpos (EConst c) } 
-    | s=STRING                      { with_loc $endpos (EString s) }
-    | i=IDENT                       { with_loc $endpos (EVar i) }
-    | TRUE                          { with_loc $endpos (EBool true) }  
-    | FALSE                         { with_loc $endpos (EBool false) }  
-    | anyLeftPar be=bexpr RIGHTPAR  { with_loc $endpos (EBexpr be) }
-    | BLOCK b=block END             { with_loc $endpos (EBlock b) }
-    | LAM fb=funbody                { with_loc $endpos (ELam fb) } 
+    | i=IDENT cs=caller+            { exprWithLoc $endpos (ECall (i, cs)) }
+    | c=CONST                       { exprWithLoc $endpos (EConst c) } 
+    | s=STRING                      { exprWithLoc $endpos (EString s) }
+    | i=IDENT                       { exprWithLoc $endpos (EVar i) }
+    | TRUE                          { exprWithLoc $endpos (EBool true) }  
+    | FALSE                         { exprWithLoc $endpos (EBool false) }  
+    | anyLeftPar be=bexpr RIGHTPAR  { exprWithLoc $endpos (EBexpr be) }
+    | BLOCK b=block END             { exprWithLoc $endpos (EBlock b) }
+    | LAM fb=funbody                { exprWithLoc $endpos (ELam fb) } 
     | FOR i=IDENT anyLeftPar fs=separated_list(COMMA, from) 
           RIGHTPAR rt=rTy b=ublock END
                                     { let (p, e) = List.split fs in 
-                                    with_loc $endpos (ECall(i, [[with_loc $endpos (ELam (p, rt, b)), []] @ e])) }
+                                    exprWithLoc $endpos (ECall(i, [[exprWithLoc $endpos (ELam (p, rt, b)), []] @ e])) }
     | CASES anyLeftPar t=ty RIGHTPAR be=bexpr ublockSymbols bs=branch* END
-                                    { with_loc $endpos (ECases (t, be, bs)) }
+                                    { exprWithLoc $endpos (ECases (t, be, bs)) }
     | IF be=bexpr b=ublock besB=elseIf* bElse=else_? END
                                     { checkIfExpr besB bElse;
-                                      with_loc $endpos (EIf (be, b, besB, getCorrectElse $endpos bElse)) }
+                                      exprWithLoc $endpos (EIf (be, b, besB, getCorrectElse $endpos bElse)) }
         
 elseIf:
     ELSE IF be=bexpr COLON b=block  { (be, b) }

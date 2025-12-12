@@ -27,10 +27,15 @@ let options =
 let usage = "usage: pyretc [option] file.arr"
 
 (* localise une erreur en indiquant la ligne et la colonne *)
-let localisation (pos : Lexing.position) =
+let localisation (pos : loc) =
   let l = pos.pos_lnum in
   let c = pos.pos_cnum - pos.pos_bol + 1 in
   eprintf "File \"%s\", line %d, characters %d-%d:\n" !ifile l (c - 1) c
+
+let typToString = function
+  | Number -> "Number"
+  | String -> "String"
+  | Tvar _ -> failwith "This expression should be typed at this point"
 
 let () =
   (* Parsing de la ligne de commande *)
@@ -87,16 +92,21 @@ let () =
   | Lexer.Lexing_error s ->
       (* Erreur lexicale. On récupère sa position absolue et
 	   on la convertit en numéro de ligne *)
-      localisation (Lexing.lexeme_start_p buf);
+      localisation (posToLoc (Lexing.lexeme_start_p buf));
       eprintf "Lexical error : %s@." s;
       exit 1
   | Parser.Error ->
       (* Erreur syntaxique. On récupère sa position absolue et on la
 	   convertit en numéro de ligne *)
-      localisation (Lexing.lexeme_start_p buf);
+      localisation (posToLoc (Lexing.lexeme_start_p buf));
       eprintf "Syntax error@.";
       exit 1
   | Ast.Parsing_error s ->
-      localisation (Lexing.lexeme_start_p buf);
-      eprintf "Lexical error : %s@." s;
+      localisation (posToLoc (Lexing.lexeme_start_p buf));
+      eprintf "Syntax error : %s@." s;
+      exit 1
+  | Typer.Typer_error (pos, t1, t2) ->
+      localisation pos;
+      eprintf "this expression has type %s but is expected to have type %s@."
+        (typToString t2) (typToString t1);
       exit 1

@@ -16,14 +16,18 @@ module V = struct
 end
 
 let rec head = function Tvar { def = Some t } -> head t | t -> t
-let rec canon t = match head t with (Tvar _ | Number | String) as t -> t
+
+let rec canon t =
+  match head t with (Tvar _ | Number | String | Boolean) as t -> t
 
 exception UnificationFailure of typ * typ
 
 let unification_error t1 t2 = raise (UnificationFailure (canon t1, canon t2))
 
 let rec occur var t =
-  match head t with Tvar v -> V.equal v var | Number | String -> false
+  match head t with
+  | Tvar v -> V.equal v var
+  | Number | String | Boolean -> false
 
 let rec unify t1 t2 =
   match (head t1, head t2) with
@@ -38,7 +42,9 @@ module Vset = Set.Make (V)
 
 let fvars t =
   let rec processType acc t =
-    match head t with Number | String -> acc | Tvar v -> Vset.add v acc
+    match head t with
+    | Number | String | Boolean -> acc
+    | Tvar v -> Vset.add v acc
   in
   processType Vset.empty t
 
@@ -78,7 +84,8 @@ let find s env =
   let rec processT t =
     match head t with
     | Number -> Number
-    | String -> Number
+    | String -> String
+    | Boolean -> Boolean
     | Tvar v1 as t -> ( try Vmap.find v1 v with Not_found -> t)
   in
   processT t
@@ -86,38 +93,81 @@ let find s env =
 let check p =
   let rec typeExpr env expr =
     (match expr.edesc with
-    | EConst i -> expr.etyp <- Some Number
-    | EString s -> expr.etyp <- Some String);
+    | EConst _ -> expr.etyp <- Some Number
+    | EBool _ -> expr.etyp <- Some Boolean
+    | EString _ -> expr.etyp <- Some String);
     expr
   in
   let rec typeBexpr env be =
     let e, opE = be in
     let typedE = typeExpr env e in
+    let previousTypedE = ref typedE in
     let previousType = ref (Option.get typedE.etyp) in
+    let beType = ref !previousType in
     let typedOpE =
       List.fold_right
         (fun (op, e) l ->
           let currentTypedE = typeExpr env e in
           let currentType = Option.get currentTypedE.etyp in
-          (match op with
-          | Add -> (
-              match (!previousType, currentType) with
-              | Number, Number | String, String -> ()
-              | _ ->
+
+          (match !previousType with
+          | Number -> (
+              let checkOtherType =
+                if currentType = Number then ()
+                else
+                  raise (Typer_error (currentTypedE.eloc, Number, currentType))
+              in
+              match op with
+              | Eq | Dif -> beType := Boolean
+              | Add | Mul | Div | Sub -> checkOtherType
+              | Inf | Sup | InfEq | SupEq ->
+                  checkOtherType;
+                  beType := Boolean
+              | And | Or ->
                   raise
-                    (Typer_error (currentTypedE.eloc, !previousType, currentType))
-              ));
+                    (Typer_error (!previousTypedE.eloc, Boolean, !previousType))
+              )
+          | String -> (
+              match op with
+              | Eq | Dif -> beType := Boolean
+              | Add ->
+                  if currentType = String then ()
+                  else
+                    raise
+                      (Typer_error (currentTypedE.eloc, String, currentType))
+              | Mul | Div | Sub | InfEq | SupEq | Inf | Sup ->
+                  raise
+                    (Typer_error (!previousTypedE.eloc, Number, !previousType))
+              | And | Or ->
+                  raise
+                    (Typer_error (!previousTypedE.eloc, Boolean, !previousType))
+              )
+          | Boolean -> (
+              match op with
+              | Eq | Dif -> beType := Boolean
+              | And | Or ->
+                  if currentType = Boolean then ()
+                  else
+                    raise
+                      (Typer_error (currentTypedE.eloc, Boolean, currentType))
+              | Add | Mul | Div | Sub | InfEq | SupEq | Inf | Sup ->
+                  raise
+                    (Typer_error (!previousTypedE.eloc, Number, !previousType))));
+
           previousType := currentType;
+          previousTypedE := currentTypedE;
           (op, currentTypedE) :: l)
         opE []
     in
-    SBexpr (typedE, typedOpE)
+    ((typedE, typedOpE), Some !beType)
   in
   let rec typeStmt env f =
     List.fold_right
       (fun s l ->
         match s.sdesc with
-        | SBexpr be -> { sdesc = typeBexpr env be; sloc = s.sloc } :: l)
+        | SBexpr be ->
+            let be, t = typeBexpr env be in
+            { sdesc = SBexpr be; sloc = s.sloc; styp = t } :: l)
       f []
   in
   typeStmt empty p

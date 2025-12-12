@@ -11,7 +11,7 @@ let posToLoc (pos : Lexing.position) =
     pos_cnum = pos.pos_cnum;
   }
 
-type typ = Number | String | Tvar of tvar [@@deriving show]
+type typ = Number | String | Boolean | Tvar of tvar [@@deriving show]
 and tvar = { id : int; mutable def : typ option } [@@deriving show]
 
 type ident = string [@@deriving show]
@@ -55,7 +55,9 @@ and exprDesc =
 [@@deriving show]
 
 and bexpr = expr * (binop * expr) list [@@deriving show]
-and stmt = { sdesc : stmtDesc; sloc : loc } [@@deriving show]
+
+and stmt = { sdesc : stmtDesc; sloc : loc; mutable styp : typ option }
+[@@deriving show]
 
 and stmtDesc =
   | SBexpr of bexpr

@@ -35,6 +35,7 @@ let localisation (pos : loc) =
 let typToString = function
   | Number -> "Number"
   | String -> "String"
+  | Boolean -> "Boolean"
   | Tvar _ -> failwith "This expression should be typed at this point"
 
 let () =

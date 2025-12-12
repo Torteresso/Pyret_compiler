@@ -5,7 +5,7 @@
         { edesc = exprDesc; eloc = posToLoc pos; etyp=None }
 
     let stmtWithLoc pos stmtDesc =
-        { sdesc = stmtDesc; sloc = posToLoc pos }
+        { sdesc = stmtDesc; sloc = posToLoc pos; styp=None }
 
     let checkBinopExpr = function 
         | [] -> true

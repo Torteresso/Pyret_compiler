@@ -4,8 +4,8 @@ open Format
 open Lexing
 open Ast
 
-(* Option de compilation, pour s'arrêter à l'issue du parser *)
 let parseOnly = ref false
+let typeOnly = ref true
 
 (* Noms des fichiers source et cible *)
 let ifile = ref ""
@@ -15,9 +15,10 @@ let set_file f s = f := s
 (* Les options du compilateur que l'on affiche en tapant arithc --help *)
 let options =
   [
-    ( "--parse-only",
-      Arg.Set parseOnly,
-      "  Pour ne faire uniquement que la phase d'analyse syntaxique" );
+    ("--parse-only", Arg.Set parseOnly, " To perform only syntaxic analysis/");
+    ( "--type-only",
+      Arg.Set typeOnly,
+      " To perform only syntaxic analysis and static type checking" );
     ( "-o",
       Arg.String (set_file ofile),
       "<file>  Pour indiquer le mom du fichier de sortie" );
@@ -26,7 +27,7 @@ let options =
 let usage = "usage: pyretc [option] file.arr"
 
 (* localise une erreur en indiquant la ligne et la colonne *)
-let localisation pos =
+let localisation (pos : Lexing.position) =
   let l = pos.pos_lnum in
   let c = pos.pos_cnum - pos.pos_bol + 1 in
   eprintf "File \"%s\", line %d, characters %d-%d:\n" !ifile l (c - 1) c
@@ -65,10 +66,17 @@ let () =
     let p = Parser.file Lexer.next_token buf in
     close_in f;
 
+    (*Show utility with deriving plugin*)
     print_endline (show_file p);
 
     (* On s'arrête ici si on ne veut faire que le parsing *)
     if !parseOnly then exit 0;
+
+    let p = Typer.check p in
+
+    print_endline (show_file p);
+
+    if !typeOnly then exit 0;
 
     assert false
     (* Compilation de l'arbre de syntaxe abstraite p. Le code machine
@@ -87,4 +95,8 @@ let () =
 	   convertit en numéro de ligne *)
       localisation (Lexing.lexeme_start_p buf);
       eprintf "Syntax error@.";
+      exit 1
+  | Ast.Parsing_error s ->
+      localisation (Lexing.lexeme_start_p buf);
+      eprintf "Lexical error : %s@." s;
       exit 1

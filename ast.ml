@@ -1,3 +1,11 @@
+exception Parsing_error of string
+
+type loc = { pos_fname : string; pos_lnum : int; pos_bol : int; pos_cnum : int }
+[@@deriving show]
+
+type typ = Number | Tvar of tvar [@@deriving show]
+and tvar = { id : int; mutable def : typ option } [@@deriving show]
+
 type ident = string [@@deriving show]
 type isVar = bool [@@deriving show]
 
@@ -22,7 +30,9 @@ type ty = PType of ident * ty list option | RType of ty list * ty
 
 type param = ident * ty [@@deriving show]
 
-type expr =
+type expr = { desc : desc; loc : loc; mutable typ : typ option }
+
+and desc =
   | EConst of int
   | EBool of bool
   | EString of string

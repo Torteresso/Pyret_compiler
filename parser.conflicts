@@ -1,0 +1,34 @@
+
+** Conflict (shift/reduce) in state 102.
+** Token involved: LEFTPAR
+** This state is reached from file after reading:
+
+IDENT caller
+
+** The derivations that appear below have the following common factor:
+** (The question mark symbol (?) represents the spot where the derivations begin to differ.)
+
+file 
+list(stmt) EOF 
+(?)
+
+** In state 102, looking ahead at LEFTPAR, shifting is permitted
+** because of the following sub-derivation:
+
+stmt list(stmt) 
+bexpr 
+expr list(binopExpr) 
+IDENT nonempty_list(caller) 
+      caller nonempty_list(caller) 
+             caller 
+             . LEFTPAR loption(separated_nonempty_list(COMMA,bexpr)) RIGHTPAR 
+
+** In state 102, looking ahead at LEFTPAR, reducing production
+** nonempty_list(caller) -> caller
+** is permitted because of the following sub-derivation:
+
+stmt list(stmt) // lookahead token appears because list(stmt) can begin with LEFTPAR
+bexpr // lookahead token is inherited
+expr list(binopExpr) // lookahead token is inherited because list(binopExpr) can vanish
+IDENT nonempty_list(caller) // lookahead token is inherited
+      caller . 

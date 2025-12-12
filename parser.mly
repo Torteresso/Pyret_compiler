@@ -1,7 +1,14 @@
 %{
     open Ast
+    
+    let posToLoc (pos : Lexing.position) = 
+        { pos_fname = pos.pos_fname; 
+          pos_lnum = pos.pos_lnum;
+          pos_bol = pos.pos_bol;
+          pos_cnum = pos.pos_cnum}
 
-    exception Parsing_error of string
+    let with_loc pos desc =
+        { desc; loc = posToLoc pos; typ=None }
 
     let checkBinopExpr = function 
         | [] -> true
@@ -24,10 +31,14 @@
                               )) 0 b) > 1 then false else true)
 
 
-    let defaultElse = [(SBexpr ((ECall ("raise", [[((EString "error"), [])]])), []))]
+    let defaultElse pos = 
+        let error_expr = with_loc pos (EString "error") in
+        let call_expr = with_loc pos (ECall ("raise", [[(error_expr, [])]])) in
+        let bexpr = (call_expr, []) in
+        [SBexpr bexpr]
 
-    let getCorrectElse = function 
-        | None -> defaultElse
+    let getCorrectElse pos = function 
+        | None -> defaultElse pos
         | Some x -> x
 
     let checkIfExpr elif el = 
@@ -36,6 +47,9 @@
                         | None -> raise (Parsing_error "An if-expression has only one branch")
                         | Some _ -> ())
             | _ :: _ -> ()
+
+   
+
 
 
 %}
@@ -124,24 +138,24 @@ binopExpr:
     op=binop e=expr                 { (op, e) }
 
 expr:
-    | i=IDENT cs=caller+            { ECall (i, cs) }
-    | c=CONST                       { EConst c } 
-    | s=STRING                      { EString s }
-    | i=IDENT                       { EVar i }
-    | TRUE                          { EBool true }  
-    | FALSE                         { EBool false }  
-    | anyLeftPar be=bexpr RIGHTPAR  { EBexpr be }
-    | BLOCK b=block END             { EBlock b }
-    | LAM fb=funbody                { ELam fb } 
+    | i=IDENT cs=caller+            { with_loc $endpos (ECall (i, cs)) }
+    | c=CONST                       { with_loc $endpos (EConst c) } 
+    | s=STRING                      { with_loc $endpos (EString s) }
+    | i=IDENT                       { with_loc $endpos (EVar i) }
+    | TRUE                          { with_loc $endpos (EBool true) }  
+    | FALSE                         { with_loc $endpos (EBool false) }  
+    | anyLeftPar be=bexpr RIGHTPAR  { with_loc $endpos (EBexpr be) }
+    | BLOCK b=block END             { with_loc $endpos (EBlock b) }
+    | LAM fb=funbody                { with_loc $endpos (ELam fb) } 
     | FOR i=IDENT anyLeftPar fs=separated_list(COMMA, from) 
           RIGHTPAR rt=rTy b=ublock END
                                     { let (p, e) = List.split fs in 
-                                    ECall(i, [[ELam (p, rt, b), []] @ e]) }
+                                    with_loc $endpos (ECall(i, [[with_loc $endpos (ELam (p, rt, b)), []] @ e])) }
     | CASES anyLeftPar t=ty RIGHTPAR be=bexpr ublockSymbols bs=branch* END
-                                    { ECases (t, be, bs) }
+                                    { with_loc $endpos (ECases (t, be, bs)) }
     | IF be=bexpr b=ublock besB=elseIf* bElse=else_? END
                                     { checkIfExpr besB bElse;
-                                      EIf (be, b, besB, getCorrectElse bElse) }
+                                      with_loc $endpos (EIf (be, b, besB, getCorrectElse $endpos bElse)) }
         
 elseIf:
     ELSE IF be=bexpr COLON b=block  { (be, b) }

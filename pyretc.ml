@@ -32,10 +32,16 @@ let localisation (pos : loc) =
   let c = pos.pos_cnum - pos.pos_bol + 1 in
   eprintf "File \"%s\", line %d, characters %d-%d:\n" !ifile l (c - 1) c
 
-let typToString = function
+let rec typToString = function
   | Number -> "Number"
   | String -> "String"
   | Boolean -> "Boolean"
+  | Any -> "Any"
+  | List t -> "List<" ^ typToString t ^ ">"
+  | Arrow (tl, t) ->
+      "("
+      ^ String.concat ", " (List.map typToString tl)
+      ^ " -> " ^ typToString t ^ ")"
   | Tvar _ -> failwith "This expression should be typed at this point"
 
 let () =
@@ -110,4 +116,8 @@ let () =
       localisation pos;
       eprintf "this expression has type %s but is expected to have type %s@."
         (typToString t2) (typToString t1);
+      exit 1
+  | Typer.Typer_errorS (pos, s) ->
+      localisation pos;
+      eprintf " %s@." s;
       exit 1

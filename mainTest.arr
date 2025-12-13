@@ -1,1 +1,2 @@
-2 <= true
+x :: Number = 2
+x := 3 

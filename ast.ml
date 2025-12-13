@@ -11,10 +11,24 @@ let posToLoc (pos : Lexing.position) =
     pos_cnum = pos.pos_cnum;
   }
 
-type typ = Number | String | Boolean | Tvar of tvar [@@deriving show]
+type typ =
+  | Number
+  | String
+  | Boolean
+  | Any
+  | List of typ
+  | Arrow of typ list * typ
+  | Tvar of tvar
+[@@deriving show]
+
 and tvar = { id : int; mutable def : typ option } [@@deriving show]
 
 type ident = string [@@deriving show]
+
+(* PType : polymorphic type | RType : Return type *)
+type ty = PType of ident * ty list option | RType of ty list * ty
+[@@deriving show]
+
 type isVar = bool [@@deriving show]
 
 type binop =
@@ -30,10 +44,6 @@ type binop =
   | Sup
   | SupEq
   | Dif
-[@@deriving show]
-
-(* PType : polymorphic type | RType : Return type *)
-type ty = PType of ident * ty list option | RType of ty list * ty
 [@@deriving show]
 
 type param = ident * ty [@@deriving show]

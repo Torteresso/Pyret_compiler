@@ -16,6 +16,7 @@ type typ =
   | String
   | Boolean
   | Any
+  | Nothing
   | List of typ
   | Arrow of typ list * typ
   | Tvar of tvar

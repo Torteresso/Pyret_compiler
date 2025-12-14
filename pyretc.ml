@@ -32,17 +32,19 @@ let localisation (pos : loc) =
   let c = pos.pos_cnum - pos.pos_bol + 1 in
   eprintf "File \"%s\", line %d, characters %d-%d:\n" !ifile l (c - 1) c
 
-let rec typToString = function
+let rec typToString t =
+  match Typer.head t with
   | Number -> "Number"
   | String -> "String"
   | Boolean -> "Boolean"
   | Any -> "Any"
+  | Nothing -> "Nothing"
   | List t -> "List<" ^ typToString t ^ ">"
   | Arrow (tl, t) ->
       "("
       ^ String.concat ", " (List.map typToString tl)
       ^ " -> " ^ typToString t ^ ")"
-  | Tvar _ -> failwith "This expression should be typed at this point"
+  | Tvar v -> "'a (id=" ^ string_of_int v.id ^ ")"
 
 let () =
   (* Parsing de la ligne de commande *)

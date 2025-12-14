@@ -1,2 +1,3 @@
-x :: Number = 2
-x := 3 
+x = empty
+print(link(42, x))
+print(link("a", x))

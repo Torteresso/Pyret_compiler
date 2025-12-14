@@ -1,2 +1,0 @@
-
-x :: List<String> = empty

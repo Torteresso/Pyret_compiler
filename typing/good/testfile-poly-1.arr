@@ -1,1 +1,0 @@
-x :: Any = raise("a")

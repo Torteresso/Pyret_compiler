@@ -76,8 +76,6 @@ let rec unify loc t1 t2 =
   | String, String -> ()
   | Boolean, Boolean -> ()
   | Nothing, Nothing -> ()
-  | Any, t -> ()
-  | t, Any -> ()
   | List t1, List t2 -> unify loc t1 t2
   | Arrow (tl1, t1), Arrow (tl2, t2) ->
       if List.length tl1 <> List.length tl2 then
@@ -89,6 +87,8 @@ let rec unify loc t1 t2 =
   | Tvar v, t ->
       if occur v t then unification_error t1 t2 loc else v.def <- Some t
   | t, Tvar v -> unify loc t2 t1
+  | Any, t -> ()
+  | t, Any -> ()
   | _ -> unification_error t1 t2 loc
 
 (* t1 <= t2 *)
@@ -259,8 +259,6 @@ let check p =
         try
           let { typ = t; isMutable } = Smap.find i env.bindings in
           let varT = if isMutable then t else find i env in
-          print_endline ("VARIABLE " ^ i);
-          print_endline (typToString2 varT);
           { edesc = expr.edesc; eloc = expr.eloc; etyp = Some varT }
         with Not_found ->
           raise (Typer_errorS (expr.eloc, "This variable is not defined.")))
@@ -295,7 +293,6 @@ let check p =
                   List.fold_right
                     (fun be (beL, tL) ->
                       let be, t = typeBexpr env be in
-                      print_endline (typToString2 (Option.get t));
                       (be :: beL, Option.get t :: tL))
                     bel ([], [])
                 in

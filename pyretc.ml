@@ -5,17 +5,19 @@ open Lexing
 open Ast
 
 let parseOnly = ref false
-let typeOnly = ref true
+let typeOnly = ref false
+let verbose = ref false
 
 (* Noms des fichiers source et cible *)
 let ifile = ref ""
 let ofile = ref ""
 let set_file f s = f := s
 
-(* Les options du compilateur que l'on affiche en tapant arithc --help *)
+(* Les options du compilateur que l'on affiche en tapant ./pyretc --help *)
 let options =
   [
-    ("--parse-only", Arg.Set parseOnly, " To perform only syntaxic analysis/");
+    ("--parse-only", Arg.Set parseOnly, " To perform only syntaxic analysis");
+    ("-v", Arg.Set verbose, " To print abstract syntax along the way");
     ( "--type-only",
       Arg.Set typeOnly,
       " To perform only syntaxic analysis and static type checking" );
@@ -55,7 +57,7 @@ let () =
     eprintf "Aucun fichier à compiler\n@?";
     exit 1);
 
-  (* Ce fichier doit avoir l'extension .exp *)
+  (* Ce fichier doit avoir l'extension .arr *)
   if not (Filename.check_suffix !ifile ".arr") then (
     eprintf "Le fichier d'entrée doit avoir l'extension .arr\n@?";
     Arg.usage options usage;
@@ -75,20 +77,20 @@ let () =
     (* Parsing: la fonction  Parser.prog transforme le tampon lexical en un
        arbre de syntaxe abstraite si aucune erreur (lexicale ou syntaxique)
        n'est détectée.
-       La fonction Lexer.token est utilisée par Parser.prog pour obtenir
+       La fonction Lexer.token est utilisée par Parser.file pour obtenir
        le prochain token. *)
     let p = Parser.file Lexer.next_token buf in
     close_in f;
 
     (*Show utility with deriving plugin*)
-    print_endline (show_file p);
+    if !verbose then print_endline (show_file p);
 
     (* On s'arrête ici si on ne veut faire que le parsing *)
     if !parseOnly then exit 0;
 
     let p = Typer.check p in
 
-    print_endline (show_file p);
+    if !verbose then print_endline (show_file p);
 
     if !typeOnly then exit 0;
 

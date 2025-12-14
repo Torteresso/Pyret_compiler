@@ -142,7 +142,7 @@ and string closingChar = parse
 {
 
   let next_token =
-    let tokens = Queue.create () in (* prochains lexèmes à renvoyer *)
+    let tokens = Queue.create () in 
     fun lb ->
       if Queue.is_empty tokens then begin
 	let l = token lb in

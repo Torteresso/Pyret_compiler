@@ -46,12 +46,12 @@
             | _ :: _ -> ()
 
     let checkStmtSpacing stmtList = 
-        List.fold_left (fun l s -> 
+        let _ = List.fold_left (fun l s -> 
             let lineNumber = s.sloc.pos_lnum in     
             if List.mem lineNumber l
             then raise (Parsing_error ("Multiple statements on line " ^ string_of_int lineNumber ^ " is not allowed"))
             else lineNumber :: l
-                       ) [] stmtList; ()          
+                       ) [] stmtList in ()          
    
 
 

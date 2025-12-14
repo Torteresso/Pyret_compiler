@@ -1,1 +1,0 @@
-x :: List< Any > = empty

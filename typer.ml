@@ -196,12 +196,14 @@ let initialEnv =
 let emptyEnv = { bindings = Smap.empty; fvars = Vset.empty }
 
 let add s t env loc isMutable =
-  if Smap.mem s env.bindings then
+  if s = "_" then env
+  else if Smap.mem s env.bindings then
     raise
       (Typer_errorS
          ( loc,
-           "This variable name conflits with a previously defined variable or \
-            built-in variable." ))
+           "The variable name \"" ^ s
+           ^ "\" conflits with a previously defined variable or built-in \
+              variable." ))
   else
     let v = fvars t in
     {
@@ -211,12 +213,14 @@ let add s t env loc isMutable =
     }
 
 let add_gen s t env loc isMutable =
-  if Smap.mem s env.bindings then
+  if s = "_" then env
+  else if Smap.mem s env.bindings then
     raise
       (Typer_errorS
          ( loc,
-           "This variable name conflits with a previously defined variable or \
-            built-in variable." ))
+           "The variable name \"" ^ s
+           ^ "\" conflits with a previously defined variable or built-in \
+              variable." ))
   else
     let v = fvars t in
     let vEnv =
@@ -261,7 +265,9 @@ let check p =
           let varT = if isMutable then t else find i env in
           { edesc = expr.edesc; eloc = expr.eloc; etyp = Some varT }
         with Not_found ->
-          raise (Typer_errorS (expr.eloc, "This variable is not defined.")))
+          raise
+            (Typer_errorS
+               (expr.eloc, "The variable \"" ^ i ^ "\" is not defined.")))
     | EBexpr be ->
         let be, t = typeBexpr env polyEnv be in
         { edesc = EBexpr be; eloc = expr.eloc; etyp = t }
@@ -309,7 +315,9 @@ let check p =
             etyp = Some !currentFunctionT;
           }
         with Not_found ->
-          raise (Typer_errorS (expr.eloc, "This function is not defined.")))
+          raise
+            (Typer_errorS
+               (expr.eloc, "The function \"" ^ i ^ "\" is not defined.")))
     | ECases (ty, be, branchL) ->
         let be, t = typeBexpr env polyEnv be in
         let caseT = tyToTyp expr.eloc polyEnv ty in
@@ -499,10 +507,14 @@ let check p =
                      ( s.sloc,
                        "Affection on non mutable variable is not allowed." ))
             with Not_found ->
-              raise (Typer_errorS (s.sloc, "This variable is not defined.")))
+              raise
+                (Typer_errorS
+                   (s.sloc, "The variable \"" ^ i ^ "\" is not defined.")))
         | SFun (i, il, (pl, rt, b)) ->
             if Smap.mem i env.bindings then
-              raise (Typer_errorS (s.sloc, "This function is already defined"))
+              raise
+                (Typer_errorS
+                   (s.sloc, "The function \"" ^ i ^ "\" is already defined"))
             else
               let polymorphEnv =
                 match il with

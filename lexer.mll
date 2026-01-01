@@ -65,7 +65,7 @@ rule token = parse
     | '('                           { [LEFTPAR] }
     | ')'                           { [RIGHTPAR] }
     | space+ (op as b)              { binop b lexbuf}
-    | space+ '<'                    { sup lexbuf }
+    | space+ '<'                    { inf lexbuf }
     | "block:"                      { [BLOCK] }
     | "else:"                       { [ELSECOLON] }
     | ':'                           { [COLON] }
@@ -74,7 +74,7 @@ rule token = parse
     | '>'                           { [RIGHTTYSYMBOL] }
     | ','                           { [COMMA] }
     | '|'                           { [PIPE] }
-    | integer as i                  { [CONST (int_of_string i)] }
+    | space* (integer as i)         { [CONST (int_of_string i)] }
     | ident as i                    { idOrKwd i}
     | '\'' as c | '"' as c          { string c lexbuf }
     | _ as c                        { raise (Lexing_error ("The caracter " 
@@ -89,8 +89,8 @@ and binop b = parse
                                       ([LEFTTYSYMBOL] @ unterminatedIndent c lexbuf)
                                       else binopError ()} 
 
-and sup = parse
-    | space                         { [SUP] }
+and inf = parse
+    | space                         { [INF] }
     | '('                           { [RIGHTTYSYMBOL; LEFTPAR] }
     | '='                           { [RIGHTTYSYMBOL; EQ] }
     | "block:"                      { [RIGHTTYSYMBOL; BLOCK] }

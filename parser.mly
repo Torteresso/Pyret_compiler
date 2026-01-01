@@ -97,7 +97,7 @@ stmt:
                                     { stmtWithLoc $endpos (SFun (i, is, fb)) }
 
 pIdent:
-     anyInf is=separated_nonempty_list(COMMA, IDENT) pClosingSymbol 
+     anyInf is=separated_nonempty_list(COMMA, IDENT) anySup 
                                     { is }
 funbody:    
     | LEFTPAR ps=separated_list(COMMA, param) RIGHTPAR rt=rTy b=ublock END
@@ -115,12 +115,8 @@ ty:
     | anyLeftPar ts=separated_list(COMMA, ty) rt=rTy RIGHTPAR
                                     { RType (ts, rt) }
 pTy: 
-     anyInf ts=separated_nonempty_list(COMMA, ty) pClosingSymbol
+     anyInf ts=separated_nonempty_list(COMMA, ty) anySup
                                     { ts }
-pClosingSymbol:
-    | RIGHTTYSYMBOL                 { () }
-    | SUP                           { () }
-
 rTy:
     ARROW t=ty                      { t }
 
@@ -190,6 +186,9 @@ anyInf:
     | INF                           { () }
     | LEFTTYSYMBOL                  { () }
 
+anySup:
+    | SUP                           { () }
+    | RIGHTTYSYMBOL                 { () }
 
 %inline binop:
     | ADD                           { Add } 
@@ -201,6 +200,6 @@ anyInf:
     | EQEQ                          { Eq }  
     | INF                           { Inf } 
     | INFEQ                         { InfEq } 
-    | SUP                           { Sup } 
+    | anySup                           { Sup } 
     | SUPEQ                         { SupEq } 
     | DIF                           { Dif } 

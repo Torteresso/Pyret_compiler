@@ -250,7 +250,7 @@ let find s env =
   processT t
 
 let check p =
-  let rec typeExpr env expr =
+  let rec typeExpr env polyEnv expr =
     match expr.edesc with
     | EConst _ -> { edesc = expr.edesc; eloc = expr.eloc; etyp = Some Number }
     | EBool _ -> { edesc = expr.edesc; eloc = expr.eloc; etyp = Some Boolean }
@@ -263,21 +263,21 @@ let check p =
         with Not_found ->
           raise (Typer_errorS (expr.eloc, "This variable is not defined.")))
     | EBexpr be ->
-        let be, t = typeBexpr env be in
+        let be, t = typeBexpr env polyEnv be in
         { edesc = EBexpr be; eloc = expr.eloc; etyp = t }
     | EBlock b ->
-        let b, t = typeBlock env b in
+        let b, t = typeBlock env polyEnv b in
         { edesc = EBlock b; eloc = expr.eloc; etyp = t }
     | ELam (pl, rt, b) ->
         let lamEnv, paramTypes =
           List.fold_left
             (fun (env1, ptL) (i, ty) ->
-              let t = tyToTyp expr.eloc Smap.empty ty in
+              let t = tyToTyp expr.eloc polyEnv ty in
               (add i t env1 expr.eloc false, t :: ptL))
             (env, []) pl
         in
-        let returnT = tyToTyp expr.eloc Smap.empty rt in
-        let b, bt = typeBlock lamEnv b in
+        let returnT = tyToTyp expr.eloc polyEnv rt in
+        let b, bt = typeBlock lamEnv polyEnv b in
         unify expr.eloc returnT (Option.get bt);
         let lamType = Arrow (paramTypes, returnT) in
         { edesc = ELam (pl, rt, b); eloc = expr.eloc; etyp = Some lamType }
@@ -292,7 +292,7 @@ let check p =
                 let typedBeL, beTypes =
                   List.fold_right
                     (fun be (beL, tL) ->
-                      let be, t = typeBexpr env be in
+                      let be, t = typeBexpr env polyEnv be in
                       (be :: beL, Option.get t :: tL))
                     bel ([], [])
                 in
@@ -311,8 +311,8 @@ let check p =
         with Not_found ->
           raise (Typer_errorS (expr.eloc, "This function is not defined.")))
     | ECases (ty, be, branchL) ->
-        let be, t = typeBexpr env be in
-        let caseT = tyToTyp expr.eloc Smap.empty ty in
+        let be, t = typeBexpr env polyEnv be in
+        let caseT = tyToTyp expr.eloc polyEnv ty in
         unify expr.eloc caseT (Option.get t);
         let typedBranch, branchTypes =
           List.fold_left
@@ -333,12 +333,12 @@ let check p =
                           (fun env1 t i -> add i t env1 expr.eloc false)
                           env tl il
                       in
-                      let b, t = typeBlock branchEnv b in
+                      let b, t = typeBlock branchEnv polyEnv b in
 
                       ((i, Some il, b) :: tBranch, t :: bTypes)
                 | bt, None ->
                     unify expr.eloc bt caseT;
-                    let b, t = typeBlock env b in
+                    let b, t = typeBlock env polyEnv b in
                     ((i, None, b) :: tBranch, t :: bTypes)
                 | _ -> raise (Typer_error (expr.eloc, caseT, branchT))
               with Not_found ->
@@ -362,19 +362,19 @@ let check p =
           etyp = checkBranchesT branchTypes;
         }
     | EIf (be, b, beBL, bElse) ->
-        let be, t = typeBexpr env be in
+        let be, t = typeBexpr env polyEnv be in
         unify expr.eloc Boolean (Option.get t);
-        let b, bt = typeBlock env b in
+        let b, bt = typeBlock env polyEnv b in
         let typedBeBL, blocksT =
           List.fold_right
             (fun (be1, b1) (accBeBL, accBT) ->
-              let be1, t1 = typeBexpr env be1 in
+              let be1, t1 = typeBexpr env polyEnv be1 in
               unify expr.eloc Boolean (Option.get t1);
-              let b1, bt1 = typeBlock env b1 in
+              let b1, bt1 = typeBlock env polyEnv b1 in
               ((be1, b1) :: accBeBL, bt1 :: accBT))
             beBL ([], [])
         in
-        let bElse, bElseT = typeBlock env bElse in
+        let bElse, bElseT = typeBlock env polyEnv bElse in
         let blocksT = List.append blocksT [ bElseT; bt ] in
         let rec checkBlocksT = function
           | [] -> None
@@ -388,16 +388,16 @@ let check p =
           eloc = expr.eloc;
           etyp = checkBlocksT blocksT;
         }
-  and typeBexpr env be =
+  and typeBexpr env polyEnv be =
     let e, opE = be in
-    let typedE = typeExpr env e in
+    let typedE = typeExpr env polyEnv e in
     let previousTypedE = ref typedE in
     let previousType = ref (Option.get typedE.etyp) in
     let beType = ref !previousType in
     let typedOpE =
       List.fold_right
         (fun (op, e) l ->
-          let currentTypedE = typeExpr env e in
+          let currentTypedE = typeExpr env polyEnv e in
           let currentType = Option.get currentTypedE.etyp in
 
           (match head !previousType with
@@ -465,34 +465,34 @@ let check p =
         opE []
     in
     ((typedE, typedOpE), Some !beType)
-  and typeBlock env b =
-    let b = typeStmts env b in
+  and typeBlock env polyEnv b =
+    let b = typeStmts env polyEnv b in
     let { styp = t } = List.hd (List.rev b) in
     (b, t)
-  and typeStmts env = function
+  and typeStmts env polyEnv = function
     | [] -> []
     | s :: l -> (
         match s.sdesc with
         | SBexpr be ->
-            let be, t = typeBexpr env be in
-            { sdesc = SBexpr be; sloc = s.sloc; styp = t } :: typeStmts env l
+            let be, t = typeBexpr env polyEnv be in
+            { sdesc = SBexpr be; sloc = s.sloc; styp = t }
+            :: typeStmts env polyEnv l
         | SDecl (isVar, i, ty, be) ->
-            let be, t = typeBexpr env be in
+            let be, t = typeBexpr env polyEnv be in
             let env = add_gen i (Option.get t) env s.sloc isVar in
             (match ty with
             | None -> ()
-            | Some ty ->
-                unify s.sloc (tyToTyp s.sloc Smap.empty ty) (Option.get t));
+            | Some ty -> unify s.sloc (tyToTyp s.sloc polyEnv ty) (Option.get t));
             { sdesc = SDecl (isVar, i, ty, be); sloc = s.sloc; styp = t }
-            :: typeStmts env l
+            :: typeStmts env polyEnv l
         | SAffec (i, be) -> (
             try
               let { typ = varTyp; isMutable } = Smap.find i env.bindings in
               if isMutable then (
-                let be, t = typeBexpr env be in
+                let be, t = typeBexpr env polyEnv be in
                 unify s.sloc varTyp (Option.get t);
                 { sdesc = SAffec (i, be); sloc = s.sloc; styp = Some varTyp }
-                :: typeStmts env l)
+                :: typeStmts env polyEnv l)
               else
                 raise
                   (Typer_errorS
@@ -517,8 +517,22 @@ let check p =
                                  "The type " ^ i
                                  ^ " is already a built-in data type, choose \
                                     another name." ))
+                        else if Smap.mem i polyEnv then
+                          raise
+                            (Typer_errorS
+                               (s.sloc, "The type " ^ i ^ " is already defined"))
                         else Smap.add i (V.create ()) acc)
                       Smap.empty il
+              in
+              let polymorphEnv =
+                Smap.union
+                  (fun i v1 v2 ->
+                    raise
+                      (Typer_errorS
+                         ( s.sloc,
+                           "Conflits : multiple definitions for the type : " ^ i
+                         )))
+                  polyEnv polymorphEnv
               in
               let funEnv, paramTypes =
                 List.fold_left
@@ -530,7 +544,7 @@ let check p =
               let returnT = tyToTyp s.sloc polymorphEnv rt in
               let funType = Arrow (paramTypes, returnT) in
               let funEnv = add i funType funEnv s.sloc false in
-              let b, bt = typeBlock funEnv b in
+              let b, bt = typeBlock funEnv polymorphEnv b in
               unify s.sloc returnT (Option.get bt);
               let env = add i funType env s.sloc false in
               {
@@ -538,6 +552,6 @@ let check p =
                 sloc = s.sloc;
                 styp = Some funType;
               }
-              :: typeStmts env l)
+              :: typeStmts env polyEnv l)
   in
-  typeStmts initialEnv p
+  typeStmts initialEnv Smap.empty p

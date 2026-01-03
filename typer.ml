@@ -101,7 +101,8 @@ let rec checkSubtype loc t1 t2 =
         unification_error (Arrow (tl1, t1)) (Arrow (tl2, t2)) loc
       else checkSubtype loc t1 t2;
       List.iter2 (checkSubtype loc) tl2 tl1
-  | Tvar v1, Tvar v2 when V.equal v1 v2 -> ()
+  | Tvar v1, t -> ()
+  | t, Tvar v2 -> ()
   | t1, t2 -> if t1 = t2 then () else unification_error t2 t1 loc
 
 module Vset = Set.Make (V)
@@ -176,6 +177,7 @@ let initialEnv =
     let a = V.create () in
     Arrow ([ Tvar a ], Tvar a)
   in
+
   let b = Smap.add "print" { vars = fvars t; typ = t; isMutable = false } b in
   let t = Arrow ([ String ], Tvar (V.create ())) in
   let b = Smap.add "raise" { vars = fvars t; typ = t; isMutable = false } b in
@@ -303,12 +305,15 @@ let check p =
                     bel ([], [])
                 in
                 let v = Tvar (V.create ()) in
+
                 unify expr.eloc !currentFunctionT (Arrow (beTypes, v));
+
                 checkSubtype expr.eloc !currentFunctionT (Arrow (beTypes, v));
                 currentFunctionT := head v;
                 typedBeL :: typeCaller l
           in
           let typedCl = typeCaller cl in
+
           {
             edesc = ECall (i, typedCl);
             eloc = expr.eloc;
@@ -322,14 +327,16 @@ let check p =
         let be, t = typeBexpr env polyEnv be in
         let caseT = tyToTyp expr.eloc polyEnv ty in
         unify expr.eloc caseT (Option.get t);
+
         let typedBranch, branchTypes =
           List.fold_left
             (fun (tBranch, bTypes) (i, il, b) ->
               try
-                let { typ = branchT } = Smap.find i env.bindings in
+                let branchT = find i env in
                 match (branchT, il) with
                 | Arrow (tl, rt), Some il ->
-                    unify expr.eloc rt caseT;
+                    checkSubtype expr.eloc caseT rt;
+
                     if List.length tl <> List.length il then
                       raise
                         (Typer_errorS
@@ -345,7 +352,7 @@ let check p =
 
                       ((i, Some il, b) :: tBranch, t :: bTypes)
                 | bt, None ->
-                    unify expr.eloc bt caseT;
+                    checkSubtype expr.eloc caseT bt;
                     let b, t = typeBlock env polyEnv b in
                     ((i, None, b) :: tBranch, t :: bTypes)
                 | _ -> raise (Typer_error (expr.eloc, caseT, branchT))
@@ -353,8 +360,8 @@ let check p =
                 raise
                   (Typer_errorS
                      ( expr.eloc,
-                       "No defined data type correspond to this branch name : "
-                       ^ i )))
+                       "No defined data type correspond to the branch name \""
+                       ^ i ^ "\"" )))
             ([], []) branchL
         in
         let rec checkBranchesT = function
@@ -410,14 +417,14 @@ let check p =
 
           (match head !previousType with
           | Number -> (
-              let checkOtherType =
+              let checkOtherType () =
                 unify currentTypedE.eloc Number currentType
               in
               match op with
               | Eq | Dif -> beType := Boolean
-              | Add | Mul | Div | Sub -> checkOtherType
+              | Add | Mul | Div | Sub -> checkOtherType ()
               | Inf | Sup | InfEq | SupEq ->
-                  checkOtherType;
+                  checkOtherType ();
                   beType := Boolean
               | And | Or ->
                   raise
@@ -553,9 +560,11 @@ let check p =
                     (add i t env1 s.sloc false, t :: ptL))
                   (env, []) pl
               in
+              let paramTypes = List.rev paramTypes in
               let returnT = tyToTyp s.sloc polymorphEnv rt in
               let funType = Arrow (paramTypes, returnT) in
               let funEnv = add i funType funEnv s.sloc false in
+
               let b, bt = typeBlock funEnv polymorphEnv b in
               unify s.sloc returnT (Option.get bt);
               let env = add i funType env s.sloc false in

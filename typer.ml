@@ -291,7 +291,7 @@ let check p =
         { edesc = ELam (pl, rt, b); eloc = expr.eloc; etyp = Some lamType }
     | ECall (i, cl) -> (
         try
-          let { typ = t } = Smap.find i env.bindings in
+          let t = find i env in
 
           let currentFunctionT = ref (copyTyp t) in
           let rec typeCaller = function
@@ -335,7 +335,7 @@ let check p =
                 let branchT = find i env in
                 match (branchT, il) with
                 | Arrow (tl, rt), Some il ->
-                    checkSubtype expr.eloc caseT rt;
+                    unify expr.eloc caseT rt;
 
                     if List.length tl <> List.length il then
                       raise
@@ -502,7 +502,8 @@ let check p =
             :: typeStmts env polyEnv l
         | SAffec (i, be) -> (
             try
-              let { typ = varTyp; isMutable } = Smap.find i env.bindings in
+              let { isMutable } = Smap.find i env.bindings in
+              let varTyp = find i env in
               if isMutable then (
                 let be, t = typeBexpr env polyEnv be in
                 unify s.sloc varTyp (Option.get t);

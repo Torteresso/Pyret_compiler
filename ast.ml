@@ -83,3 +83,45 @@ and caller = bexpr list [@@deriving show]
 and branch = ident * ident list option * block [@@deriving show]
 
 type file = stmt list [@@deriving show]
+type frameSize = int [@@deriving show]
+
+type exprC = { edescC : exprDescC; elocC : loc; mutable etypC : typ option }
+[@@deriving show]
+
+and var =
+  | Vglobal of ident
+  | Vlocal of ident * int
+  | Vclos of ident * int
+  | Varg of ident * int
+
+and exprDescC =
+  | CConst of int
+  | CBool of bool
+  | CString of string
+  | CVar of var
+  | CBexpr of bexprC
+  | CBlock of blockC
+  | CClos of ident * var list
+  | CCall of ident * callerC list
+  | CCases of ty * bexprC * branchC list
+  | CIf of bexprC * blockC * (bexprC * blockC) list * blockC
+[@@deriving show]
+
+and paramC = var * ty [@@deriving show]
+and bexprC = exprC * (binop * exprC) list [@@deriving show]
+and blockC = stmtC list [@@deriving show]
+and callerC = bexprC list [@@deriving show]
+and branchC = ident * var list * blockC [@@deriving show]
+
+and stmtC = { sdescC : stmtDescC; slocC : loc; mutable stypC : typ option }
+[@@deriving show]
+
+and stmtDescC =
+  | CBexpr of bexprC * frameSize
+  | CAffec of ident * bexprC * frameSize
+  | CDecl of isVar * var * ty option * bexprC * frameSize
+  | CFun of ident * ident list option * ty * exprC * frameSize
+  | CLetFun of ident * paramC list * blockC * frameSize
+[@@deriving show]
+
+type fileC = stmtC list [@@deriving show]

@@ -8,5 +8,7 @@ syntax
 doc
 typing
 mainTest.arr
+mainTest.s
 pyretc
 .ocamlformat
+.pyret

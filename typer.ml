@@ -154,7 +154,7 @@ let rec tyToTyp loc polymorEnv = function
             Tvar v
           with Not_found ->
             raise (Typer_errorS (loc, "The type " ^ i ^ " do not exist."))))
-  | RType (tl, t) ->
+  | FType (tl, t) ->
       Arrow (List.map (tyToTyp loc polymorEnv) tl, tyToTyp loc polymorEnv t)
 
 let initialEnv =

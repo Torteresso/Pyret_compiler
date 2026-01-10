@@ -26,8 +26,8 @@ and tvar = { id : int; mutable def : typ option } [@@deriving show]
 
 type ident = string [@@deriving show]
 
-(* PType : polymorphic type | RType : Return type *)
-type ty = PType of ident * ty list option | RType of ty list * ty
+(* PType : polymorphic type | FType : Return type *)
+type ty = PType of ident * ty list option | FType of ty list * ty
 [@@deriving show]
 
 type isVar = bool [@@deriving show]
@@ -99,10 +99,10 @@ and exprDescC =
   | CBool of bool
   | CString of string
   | CVar of var
-  | CBexpr of bexprC
+  | CEBexpr of bexprC
   | CBlock of blockC
   | CClos of ident * var list
-  | CCall of ident * callerC list
+  | CCall of ident * int * callerC list
   | CCases of ty * bexprC * branchC list
   | CIf of bexprC * blockC * (bexprC * blockC) list * blockC
 [@@deriving show]
@@ -120,7 +120,7 @@ and stmtDescC =
   | CBexpr of bexprC * frameSize
   | CAffec of ident * bexprC * frameSize
   | CDecl of isVar * var * ty option * bexprC * frameSize
-  | CFun of ident * ident list option * ty * exprC * frameSize
+  | CFun of ident * ident list option * ty * exprC * int
   | CLetFun of ident * paramC list * blockC * frameSize
 [@@deriving show]
 

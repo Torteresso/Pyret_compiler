@@ -124,3 +124,6 @@ let () =
       localisation pos;
       eprintf " %s@." s;
       exit 1
+  | Compile.CompilerInternalError s ->
+      eprintf " %s@." s;
+      exit 2

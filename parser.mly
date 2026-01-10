@@ -113,7 +113,7 @@ ty:
     | i=IDENT ts=pTy? 
                                     { PType (i, ts) }
     | anyLeftPar ts=separated_list(COMMA, ty) rt=rTy RIGHTPAR
-                                    { RType (ts, rt) }
+                                    { FType (ts, rt) }
 pTy: 
      anyInf ts=separated_nonempty_list(COMMA, ty) anySup
                                     { ts }

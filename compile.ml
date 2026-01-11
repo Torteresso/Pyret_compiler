@@ -117,6 +117,16 @@ let getUniqueName () =
   counter := !counter + 1;
   "_fun" ^ string_of_int n
 
+let defaultEnv =
+  let builtInFunctionNames =
+    [
+      "print"; "empty"; "nothing"; "num-modulo"; "link"; "raise"; "each"; "fold";
+    ]
+  in
+  List.fold_left
+    (fun env s -> Smap.add s (Vlocal (s, -1)) env)
+    Smap.empty builtInFunctionNames
+
 let rec clos_expr env e =
   let newDesc =
     match e.edesc with
@@ -164,7 +174,7 @@ let rec clos_expr env e =
               beLC :: l)
             cl []
         in
-        CCall (i, -1, clC)
+        CCall (i, Smap.find i env, clC)
     | ECases (t, be, bl) ->
         let beC = clos_bexpr env be in
         let blC =
@@ -222,12 +232,15 @@ and clos_stmt ?(isGlobal = false) env s =
     | SBexpr be -> (env, [ CBexpr (clos_bexpr env be, -1) ])
     | SFun (i, il, (pl, t, b)) ->
         let freeVars = findFree_stmt s in
-        let env, vars =
+        let env = Smap.add i (Vlocal (i, -1)) env in
+        let env, vars, _ =
           StringSet.fold
-            (fun s (env, l) ->
-              let v = Vclos (s, -1) in
-              (Smap.add s v env, v :: l))
-            freeVars (env, [])
+            (fun s (env, l, n) ->
+              let n = n + 8 in
+              let vClos = Vclos (s, n) in
+              let vEnv = Smap.find s env in
+              (Smap.add s vClos env, vEnv :: l, n))
+            freeVars (env, [], 8)
         in
         let funName = getUniqueName () in
         let eClos =
@@ -243,7 +256,7 @@ and clos_stmt ?(isGlobal = false) env s =
         in
         let bC = clos_block env b in
         let cLetFun = CLetFun (funName, paramCL, bC, -1) in
-        (env, [ cLetFun; cFun ])
+        (env, [ cFun; cLetFun ])
     | SAffec (i, be) -> (env, [ CAffec (i, clos_bexpr env be, -1) ])
     | SDecl (iV, i, t, be) ->
         let v = if isGlobal then Vglobal i else Vlocal (i, -1) in
@@ -262,7 +275,7 @@ let clos_prog p =
       (fun (l, env) s ->
         let newEnv, newL = clos_stmt ~isGlobal:true env s in
         (List.append newL l, newEnv))
-      ([], Smap.empty) p
+      ([], defaultEnv) p
   in
   let pC = List.rev pC in
   Hashtbl.fold (fun _ cLetFun l -> cLetFun :: l) lamEnv pC
@@ -273,7 +286,9 @@ let rec alloc_expr (env : local_env) (fpcur : int) (e : exprC) =
   let newDesc, fpmax =
     match e.edescC with
     | CConst i -> (CConst i, fpcur)
-    | CCall (i, _, cl) ->
+    | CString s -> (CString s, fpcur)
+    | CBool b -> (CBool b, fpcur)
+    | CCall (i, v, cl) ->
         let clA, fpmaxCL =
           List.fold_right
             (fun beL (l, fp) ->
@@ -287,8 +302,7 @@ let rec alloc_expr (env : local_env) (fpcur : int) (e : exprC) =
               (beLC :: l, max fp fpmaxBe))
             cl ([], 0)
         in
-
-        (CCall (i, Smap.find i env, clA), fpmaxCL)
+        (CCall (i, alloc_var env v, clA), fpmaxCL)
     | CVar v -> (CVar (alloc_var env v), fpcur)
     | CClos (i, vl) ->
         let vlA =
@@ -305,12 +319,7 @@ let rec alloc_expr (env : local_env) (fpcur : int) (e : exprC) =
 and alloc_var env = function
   | Vglobal i -> Vglobal i
   | Vlocal (i, _) -> Vlocal (i, Smap.find i env)
-  | Vclos (i, _) ->
-      let pos =
-        try Smap.find i env with Not_found -> -1
-        (* by convention pos = -1 is global var*)
-      in
-      Vclos (i, pos)
+  | Vclos (i, pos) -> Vclos (i, pos)
   | Varg (i, _) -> Varg (i, Smap.find i env)
 
 and alloc_bexpr (env : local_env) fpcur be =
@@ -344,11 +353,11 @@ and alloc_stmt (env : local_env) (fpcur : int) s =
         (CBexpr (beA, fpmax), env, fpmax)
     | CFun (i, il, t, e, _) ->
         let fpcur = fpcur + 8 in
-        let env = Smap.add i fpcur env in
+        let env = Smap.add i (-fpcur) env in
         let eA, fpmax = alloc_expr env fpcur e in
-        (CFun (i, il, t, eA, fpcur), env, fpmax)
+        (CFun (i, il, t, eA, -fpcur), env, fpmax)
     | CLetFun (i, pl, b, _) ->
-        let plA, env, fpcur =
+        let plA, env, _ =
           List.fold_left
             (fun (l, env, fpcur) (v, t) ->
               let fpcur = fpcur + 8 in
@@ -357,29 +366,41 @@ and alloc_stmt (env : local_env) (fpcur : int) s =
                 | Vglobal i | Vlocal (i, _) | Vclos (i, _) | Varg (i, _) -> i
               in
               let env = Smap.add nameV fpcur env in
-              print_endline "ENTERING LETFUN...";
               let vA = alloc_var env v in
               ((vA, t) :: l, env, fpcur))
-            ([], env, 8) pl
+            ([], env, 16) pl (* 16 because the first argument if the closure *)
         in
-        let bA, fpmax = alloc_block env fpcur b in
-        (CLetFun (i, plA, bA, fpmax), env, fpmax)
+        let bA, fpmax = alloc_block env 0 b in
+        (CLetFun (i, plA, bA, fpmax), env, fpcur)
   in
   ({ sdescC = newDesc; slocC = s.slocC; stypC = s.stypC }, newEnv, newFpCur)
 
 let alloc p =
-  let p, _, _ =
+  let p, _, n =
     List.fold_left
       (fun (l, env, n) s ->
         let newS, newEnv, newN = alloc_stmt env n s in
         (newS :: l, newEnv, newN))
       ([], Smap.empty, 0) p
   in
-
-  List.rev p
+  (List.rev p, n)
 
 (******************************************************************************)
 (* phase 2 : production de code *)
+
+let stringCounter = ref 0
+let stringLabels = ref []
+
+let addStringLabel s =
+  let sLabel = ".S_string" ^ string_of_int !stringCounter in
+  stringCounter := !stringCounter + 1;
+  stringLabels := (sLabel, s) :: !stringLabels;
+  sLabel
+
+let addAllStrings code =
+  List.fold_left
+    (fun code (sLabel, s) -> code ++ label sLabel ++ string s)
+    code !stringLabels
 
 let popn n = addq (imm n) !%rsp
 let pushn n = subq (imm n) !%rsp
@@ -391,25 +412,29 @@ let rec compile_expr e =
       ++ call "_my_malloc"
       ++ movq (imm 2) (ind rax)
       ++ movq (imm i) (ind ~ofs:8 rax)
-  | CVar v -> (
-      match v with
-      | Vglobal i -> movq (lab i) !%rax
-      | Vlocal (i, pos) -> movq (ind ~ofs:pos rbp) !%rax
-      | Vclos (i, pos) -> failwith "")
+  | CString s ->
+      let sLabel = addStringLabel s in
+      movq (imm 16) !%rdi
+      ++ call "_my_malloc"
+      ++ movq (imm 3) (ind rax)
+      ++ movq (ilab sLabel) (ind ~ofs:8 rax)
+  | CBool b ->
+      let bInt = if b then 1 else 0 in
+      movq (imm 16) !%rdi
+      ++ call "_my_malloc"
+      ++ movq (imm 1) (ind rax)
+      ++ movq (imm bInt) (ind ~ofs:8 rax)
+  | CVar v -> compile_var v
   | CClos (i, vl) ->
       let envCode, _ =
         List.fold_left
           (fun (code, n) v ->
-            let pos =
-              match v with
-              | Vclos (_, n) -> n
-              | _ ->
-                  raise
-                    (CompilerInternalError
-                       ("Non clos variable into the closure : " ^ i))
+            let newCode =
+              movq !%rax !%rdx ++ compile_var v
+              ++ movq !%rax (ind ~ofs:(16 + n) rdx)
+              ++ movq !%rdx !%rax
             in
-
-            (code ++ movq (ind ~ofs:pos rbp) (ind ~ofs:(16 + n) rax), n + 8))
+            (code ++ newCode, n + 8))
           (nop, 0) vl
       in
       movq (imm (16 + (8 * List.length vl))) !%rdi
@@ -417,36 +442,56 @@ let rec compile_expr e =
       ++ movq (imm 6) (ind rax)
       ++ movq (ilab i) (ind ~ofs:8 rax)
       ++ envCode
-  | CCall (i, pos, cl) -> (
+  | CCall (i, v, cl) -> (
       match cl with
       | [ bel ] ->
           List.fold_left
             (fun code be -> code ++ compile_bexpr be ++ pushq !%rax)
             nop bel
-          ++ movq (ind ~ofs:pos rbp) !%rax
-          ++ call_star (ind ~ofs:8 rax)
-          ++ popn (8 * List.length bel)
+          ++ compile_var v ++ pushq !%rax
+          ++
+          (*  ++ movq (ind ~ofs:pos rbp) !%rax *)
+          call_star (ind ~ofs:8 rax)
+          ++ popn (8 * (1 + List.length bel))
+          (* plus one for the closure *)
       | _ -> failwith "")
   | CVar _ -> failwith "other"
 
+and compile_var = function
+  | Vglobal i -> movq (lab i) !%rax
+  | Vlocal (i, pos) -> movq (ind ~ofs:pos rbp) !%rax
+  | Vclos (i, pos) ->
+      movq (ind ~ofs:16 rbp) !%rdx ++ movq (ind ~ofs:pos rdx) !%rax
+  | Varg (i, pos) -> movq (ind ~ofs:pos rbp) !%rax
+
 and compile_bexpr be =
+  let compile_binop op e1 e2 =
+    pushq !%rax ++ compile_expr e2 ++ popq rbx
+    ++
+    match op with
+    | Add -> movq (ind ~ofs:8 rbx) !%rbx ++ addq !%rbx (ind ~ofs:8 rax)
+  in
   let e, bel = be in
-  compile_expr e
+  let code, _ =
+    List.fold_left
+      (fun (code, previousE) (op, currentE) ->
+        (code ++ compile_binop op previousE currentE, currentE))
+      (compile_expr e, e)
+      bel
+  in
+  code
 
 and compile_block b = List.fold_left compile_stmt (nop, nop) b
 
 and compile_stmt (codefun, codemain) s =
   match s.sdescC with
   | CBexpr (be, fpmax) ->
-      print_endline "calling bexpr";
       let code = compile_bexpr be in
       (codefun, codemain ++ code)
   | CFun (i, _, _, e, pos) ->
-      print_endline "calling fun";
       let code = compile_expr e ++ movq !%rax (ind ~ofs:pos rbp) in
       (codefun, codemain ++ code)
   | CLetFun (i, pl, b, fpmax) ->
-      print_endline "calling letfun";
       let codeBFun, codeBMain = compile_block b in
       let code =
         label i ++ pushq !%rbp ++ movq !%rsp !%rbp ++ pushn fpmax ++ codeBMain
@@ -476,26 +521,36 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
   let addPrintCode (codefun, codemain) =
     let codeF =
       label "_print" ++ pushq !%rbp ++ movq !%rsp !%rbp
-      ++ movq (ind ~ofs:16 rbp) !%rax
+      ++ movq (ind ~ofs:24 rbp) !%rax
       ++ cmpq (imm 0) (ind rax)
       ++ jne "_not_nothing"
-      ++ movq (ilab ".nothing") !%rdi
+      ++ movq (ilab ".S_nothing") !%rdi
       ++ movq (imm 0) !%rax
-      ++ call "printf" ++ jmp "_done" ++ label "_not_nothing"
+      ++ call "_my_printf" ++ jmp "_done" ++ label "_not_nothing"
       ++ cmpq (imm 1) (ind rax)
-      ++ jne "_not_bool" ++ jmp "_done" ++ label "_not_bool"
+      ++ jne "_not_bool"
+      ++ cmpq (imm 1) (ind ~ofs:8 rax) (* check if bool is true *)
+      ++ jne "_false"
+      ++ movq (ilab ".S_true") !%rdi
+      ++ call "_my_printf" ++ jmp "_done" ++ label "_false"
+      ++ movq (ilab ".S_false") !%rdi
+      ++ call "_my_printf" ++ jmp "_done" ++ label "_not_bool"
       ++ cmpq (imm 2) (ind rax)
       ++ jne "_not_int"
       ++ movq (ind ~ofs:8 rax) !%rdi
       ++ call "_print_int" ++ jmp "_done" ++ label "_not_int"
       ++ cmpq (imm 3) (ind rax)
-      ++ jne "_not_string" ++ jmp "_done" ++ label "_not_string"
+      ++ jne "_not_string"
+      ++ movq (ind ~ofs:8 rax) !%rdi
+      ++ call "_my_printf" ++ jmp "_done" ++ label "_not_string"
       ++ cmpq (imm 4) (ind rax)
       ++ jne "_not_empty" ++ jmp "_done" ++ label "_not_empty"
       ++ cmpq (imm 5) (ind rax)
       ++ jne "_not_link" ++ jmp "_done" ++ label "_not_link"
       ++ cmpq (imm 6) (ind rax)
-      ++ jne "_not_nothing" ++ label "_done" ++ popq rbp ++ ret
+      ++ jne "_not_nothing" ++ label "_done"
+      ++ movq (ind ~ofs:24 rbp) !%rax
+      ++ popq rbp ++ ret
     in
 
     (codefun ++ codeF, codemain)
@@ -505,21 +560,11 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
       label "_print_int" ++ movq !%rdi !%rsi
       ++ movq (ilab ".S_print_int") !%rdi
       ++ movq (imm 0) !%rax
-      ++ call "printf" ++ ret
-    in
-    codefun ++ code
-  in
-  let addPrintStringCode codefun =
-    let code =
-      label "_print_string" ++ movq !%rdi !%rsi
-      ++ movq (ilab ".S_print_string") !%rdi
-      ++ movq (imm 0) !%rax
-      ++ call "printf" ++ ret
+      ++ call "_my_printf" ++ ret
     in
     codefun ++ code
   in
   let codefun = addPrintIntCode codefun in
-  let codefun = addPrintStringCode codefun in
   let codefun, codemain = addPrintCode (codefun, codemain) in
 
   let addMyMallocCode (codefun, codemain) =
@@ -531,39 +576,45 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
     (codefun ++ codeF, codemain)
   in
   let codefun, codemain = addMyMallocCode (codefun, codemain) in
+  let addMyPrintfCode (codefun, codemain) =
+    let codeF =
+      label "_my_printf" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ andq (imm (-16)) !%rsp
+      ++ call "printf" ++ movq !%rbp !%rsp ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addMyPrintfCode (codefun, codemain) in
   (codefun, codemain)
 
-let compile_program p ofile =
-  List.iter
-    (fun s ->
-      let freeVars = findFree_stmt s in
-      print_endline "-------";
-      StringSet.iter (fun s -> print_endline s) freeVars)
-    p;
+let compile_program ?(verbose = false) p ofile =
   let p = clos_prog p in
-  print_endline "CLOSURE DONE";
+  if verbose then print_endline "CLOSURE DONE";
   let p = addBuildInFunctionsToP p in
-  print_endline (show_fileC p);
-  let p = alloc p in
-  print_endline "ALLOCATION DONE";
-  print_endline (show_fileC p);
+  if verbose then print_endline (show_fileC p);
+  let p, fpmax = alloc p in
+  if verbose then (
+    print_endline "ALLOCATION DONE";
+    print_endline (show_fileC p));
   let codefun, code = addBuiltInFunctionsToCode (nop, nop) in
   let codefun, code = List.fold_left compile_stmt (codefun, code) p in
+  let stringData = addAllStrings nop in
   let p =
     {
       text =
-        globl "main" ++ label "main" ++ movq !%rsp !%rbp ++ code
+        globl "main" ++ label "main" ++ pushq !%rbp ++ movq !%rsp !%rbp
+        ++ pushn fpmax ++ code
         ++ movq (imm 0) !%rax
-        ++ ret ++ codefun;
+        ++ popn fpmax ++ popq rbp ++ ret ++ codefun;
       (* exit *)
       data =
         Hashtbl.fold
           (fun x _ l -> label x ++ dquad [ 1 ] ++ l)
           genv
-          (label ".S_print_int" ++ string "%d\n" ++ label ".S_print_string"
-         ++ string "%s\n" ++ label ".nothing" ++ string "nothing\n"
-         ++ label ".true" ++ string "true\n" ++ label ".false"
-         ++ string "false\n" ++ label ".empty" ++ string "empty\n");
+          (label ".S_print_int" ++ string "%d" ++ label ".S_nothing"
+         ++ string "nothing" ++ label ".S_true" ++ string "true"
+         ++ label ".S_false" ++ string "false" ++ label ".S_empty"
+         ++ string "empty" ++ stringData);
     }
   in
   let f = open_out ofile in

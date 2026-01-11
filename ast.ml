@@ -102,7 +102,7 @@ and exprDescC =
   | CEBexpr of bexprC
   | CBlock of blockC
   | CClos of ident * var list
-  | CCall of ident * int * callerC list
+  | CCall of ident * var * callerC list
   | CCases of ty * bexprC * branchC list
   | CIf of bexprC * blockC * (bexprC * blockC) list * blockC
 [@@deriving show]

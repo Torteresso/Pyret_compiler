@@ -125,5 +125,5 @@ let () =
       eprintf " %s@." s;
       exit 1
   | Compile.CompilerInternalError s ->
-      eprintf " %s@." s;
+      eprintf "Internal compiler error : %s@." s;
       exit 2

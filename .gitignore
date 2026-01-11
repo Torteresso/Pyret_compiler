@@ -7,8 +7,8 @@ tests-22-oct
 syntax
 doc
 typing
-mainTest.arr
-mainTest.s
+mainTest*
+out
 pyretc
 .ocamlformat
 .pyret

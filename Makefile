@@ -6,7 +6,7 @@ clean:
 	dune clean
 
 test: all
-	./pyretc mainTest.arr
+	./pyretc -v mainTest.arr
 	@echo "From MY COMPILER : "	
 	gcc -no-pie mainTest.s -o mainTest
 	./mainTest

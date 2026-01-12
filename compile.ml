@@ -288,6 +288,9 @@ let rec alloc_expr (env : local_env) (fpcur : int) (e : exprC) =
     | CConst i -> (CConst i, fpcur)
     | CString s -> (CString s, fpcur)
     | CBool b -> (CBool b, fpcur)
+    | CEBexpr be ->
+        let beA, env, fpmax = alloc_bexpr env fpcur be in
+        (CEBexpr beA, fpmax)
     | CCall (i, v, cl) ->
         let clA, fpmaxCL =
           List.fold_right
@@ -413,11 +416,15 @@ let rec compile_expr e =
       ++ movq (imm 2) (ind rax)
       ++ movq (imm i) (ind ~ofs:8 rax)
   | CString s ->
-      let sLabel = addStringLabel s in
-      movq (imm 16) !%rdi
+      let sSize, charL = (String.length s + 1, String.to_seq s) in
+      movq (imm (8 + sSize)) !%rdi
       ++ call "_my_malloc"
       ++ movq (imm 3) (ind rax)
-      ++ movq (ilab sLabel) (ind ~ofs:8 rax)
+      ++ Seq.fold_lefti
+           (fun code i c ->
+             code ++ movb (imm (Char.code c)) (ind ~ofs:(8 + i) rax))
+           nop charL
+      ++ movb (imm 0) (ind ~ofs:(7 + sSize) rax)
   | CBool b ->
       let bInt = if b then 1 else 0 in
       movq (imm 16) !%rdi
@@ -455,6 +462,7 @@ let rec compile_expr e =
           ++ popn (8 * (1 + List.length bel))
           (* plus one for the closure *)
       | _ -> failwith "")
+  | CEBexpr be -> compile_bexpr be
   | CVar _ -> failwith "other"
 
 and compile_var = function
@@ -466,18 +474,134 @@ and compile_var = function
 
 and compile_bexpr be =
   let compile_binop op e1 e2 =
-    pushq !%rax ++ compile_expr e2 ++ popq rbx
+    pushq !%rax ++ compile_expr e2 ++ popq rbx ++ movq !%rax !%rdx
+    ++ movq !%rbx !%rax ++ movq !%rdx !%rbx
     ++
     match op with
-    | Add -> movq (ind ~ofs:8 rbx) !%rbx ++ addq !%rbx (ind ~ofs:8 rax)
+    | Add -> (
+        match e1.etypC with
+        | Some Number ->
+            movq (ind ~ofs:8 rbx) !%rbx ++ addq !%rbx (ind ~ofs:8 rax)
+        | Some String ->
+            movq !%rax !%rsi ++ movq !%rbx !%rdi ++ call "_concat_strings")
+    | Sub -> movq (ind ~ofs:8 rbx) !%rbx ++ subq !%rbx (ind ~ofs:8 rax)
+    | Mul ->
+        movq (ind ~ofs:8 rbx) !%rbx
+        ++ imulq (ind ~ofs:8 rax) !%rbx
+        ++ movq !%rbx (ind ~ofs:8 rax)
+    | Div ->
+        movq !%rax !%rcx
+        ++ movq (ind ~ofs:8 rbx) !%rbx
+        ++ movq (ind ~ofs:8 rax) !%rax
+        ++ cqto ++ idivq !%rbx
+        ++ movq !%rax (ind ~ofs:8 rcx)
+        ++ movq !%rcx !%rax
+    | And ->
+        movq (ind ~ofs:8 rbx) !%rbx
+        ++ andq (ind ~ofs:8 rax) !%rbx
+        ++ movq !%rbx (ind ~ofs:8 rax)
+    | Or ->
+        movq (ind ~ofs:8 rbx) !%rbx
+        ++ orq (ind ~ofs:8 rax) !%rbx
+        ++ movq !%rbx (ind ~ofs:8 rax)
+    | Inf ->
+        movq (ind ~ofs:8 rax) !%rax
+        ++ cmpq (ind ~ofs:8 rbx) !%rax
+        ++ setl !%al ++ movzbq !%al rax
+        ++ movq !%rax (ind ~ofs:8 rbx)
+        ++ movq !%rbx !%rax
+        ++ movq (imm 1) (ind rax)
+    | InfEq ->
+        movq (ind ~ofs:8 rax) !%rax
+        ++ cmpq (ind ~ofs:8 rbx) !%rax
+        ++ setle !%al ++ movzbq !%al rax
+        ++ movq !%rax (ind ~ofs:8 rbx)
+        ++ movq !%rbx !%rax
+        ++ movq (imm 1) (ind rax)
+    | Sup ->
+        movq (ind ~ofs:8 rax) !%rax
+        ++ cmpq (ind ~ofs:8 rbx) !%rax
+        ++ setg !%al ++ movzbq !%al rax
+        ++ movq !%rax (ind ~ofs:8 rbx)
+        ++ movq !%rbx !%rax
+        ++ movq (imm 1) (ind rax)
+    | SupEq ->
+        movq (ind ~ofs:8 rax) !%rax
+        ++ cmpq (ind ~ofs:8 rbx) !%rax
+        ++ setge !%al ++ movzbq !%al rax
+        ++ movq !%rax (ind ~ofs:8 rbx)
+        ++ movq !%rbx !%rax
+        ++ movq (imm 1) (ind rax)
+    | Eq ->
+        movq (ind rax) !%rcx
+        ++ cmpq (ind rbx) !%rcx
+        ++ jne ".eq_false"
+        ++ cmpq (imm 0) !%rcx
+        ++ je ".eq_true"
+        ++ cmpq (imm 1) !%rcx
+        ++ je ".eq_bool"
+        ++ cmpq (imm 2) !%rcx
+        ++ je ".eq_int"
+        ++ cmpq (imm 3) !%rcx
+        ++ je ".eq_string"
+        ++ cmpq (imm 4) !%rcx
+        ++ je ".eq_true" ++ jmp ".eq_false" ++ label ".eq_bool"
+        ++ label ".eq_int"
+        ++ movq (ind ~ofs:8 rax) !%rax
+        ++ cmpq (ind ~ofs:8 rbx) !%rax
+        ++ sete !%al ++ jmp ".eq_final" ++ label ".eq_string"
+        ++ leaq (ind ~ofs:8 rax) rdi
+        ++ leaq (ind ~ofs:8 rbx) rsi
+        ++ call "_my_strcmp" ++ testq !%rax !%rax ++ sete !%al
+        ++ jmp ".eq_final" ++ label ".eq_true"
+        ++ movb (imm 1) !%al
+        ++ jmp ".eq_final" ++ label ".eq_false"
+        ++ movb (imm 0) !%al
+        ++ label ".eq_final" ++ movzbq !%al rax ++ pushq !%rax
+        ++ movq (imm 16) !%rdi
+        ++ call "_my_malloc"
+        ++ movq (imm 1) (ind rax)
+        ++ popq rcx
+        ++ movq !%rcx (ind ~ofs:8 rax)
+    | Dif ->
+        movq (ind rax) !%rcx
+        ++ cmpq (ind rbx) !%rcx
+        ++ jne ".eq_true"
+        ++ cmpq (imm 0) !%rcx
+        ++ je ".eq_false"
+        ++ cmpq (imm 1) !%rcx
+        ++ je ".eq_bool"
+        ++ cmpq (imm 2) !%rcx
+        ++ je ".eq_int"
+        ++ cmpq (imm 3) !%rcx
+        ++ je ".eq_string"
+        ++ cmpq (imm 4) !%rcx
+        ++ je ".eq_false" ++ jmp ".eq_false" ++ label ".eq_bool"
+        ++ label ".eq_int"
+        ++ movq (ind ~ofs:8 rax) !%rax
+        ++ cmpq (ind ~ofs:8 rbx) !%rax
+        ++ setne !%al ++ jmp ".eq_final" ++ label ".eq_string"
+        ++ leaq (ind ~ofs:8 rax) rdi
+        ++ leaq (ind ~ofs:8 rbx) rsi
+        ++ call "_my_strcmp" ++ testq !%rax !%rax ++ setne !%al
+        ++ jmp ".eq_final" ++ label ".eq_true"
+        ++ movb (imm 1) !%al
+        ++ jmp ".eq_final" ++ label ".eq_false"
+        ++ movb (imm 0) !%al
+        ++ label ".eq_final" ++ movzbq !%al rax ++ pushq !%rax
+        ++ movq (imm 16) !%rdi
+        ++ call "_my_malloc"
+        ++ movq (imm 1) (ind rax)
+        ++ popq rcx
+        ++ movq !%rcx (ind ~ofs:8 rax)
   in
   let e, bel = be in
   let code, _ =
-    List.fold_left
-      (fun (code, previousE) (op, currentE) ->
+    List.fold_right
+      (fun (op, currentE) (code, previousE) ->
         (code ++ compile_binop op previousE currentE, currentE))
-      (compile_expr e, e)
       bel
+      (compile_expr e, e)
   in
   code
 
@@ -541,7 +665,7 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
       ++ call "_print_int" ++ jmp "_done" ++ label "_not_int"
       ++ cmpq (imm 3) (ind rax)
       ++ jne "_not_string"
-      ++ movq (ind ~ofs:8 rax) !%rdi
+      ++ leaq (ind ~ofs:8 rax) rdi
       ++ call "_my_printf" ++ jmp "_done" ++ label "_not_string"
       ++ cmpq (imm 4) (ind rax)
       ++ jne "_not_empty" ++ jmp "_done" ++ label "_not_empty"
@@ -585,6 +709,67 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
     (codefun ++ codeF, codemain)
   in
   let codefun, codemain = addMyPrintfCode (codefun, codemain) in
+  let addMyStrLenCode (codefun, codemain) =
+    let codeF =
+      label "_my_strlen" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ andq (imm (-16)) !%rsp
+      ++ call "strlen" ++ movq !%rbp !%rsp ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addMyStrLenCode (codefun, codemain) in
+
+  let addMyMemCpyCode (codefun, codemain) =
+    let codeF =
+      label "_my_memcpy" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ andq (imm (-16)) !%rsp
+      ++ call "memcpy" ++ movq !%rbp !%rsp ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addMyMemCpyCode (codefun, codemain) in
+  let addMyStrCpyCode (codefun, codemain) =
+    let codeF =
+      label "_my_strcpy" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ andq (imm (-16)) !%rsp
+      ++ call "strcpy" ++ movq !%rbp !%rsp ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addMyStrCpyCode (codefun, codemain) in
+  let addMyStrCmpCode (codefun, codemain) =
+    let codeF =
+      label "_my_strcmp" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ andq (imm (-16)) !%rsp
+      ++ call "strcmp" ++ movq !%rbp !%rsp ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addMyStrCmpCode (codefun, codemain) in
+  let addConcatStrings (codefun, codemain) =
+    let code =
+      label "_concat_strings" ++ pushq !%rsi ++ pushq !%rdi
+      ++ leaq (ind ~ofs:8 rdi) rdi
+      ++ call "_my_strlen" ++ pushq !%rax
+      ++ leaq (ind ~ofs:8 rsi) rdi
+      ++ call "_my_strlen" ++ popq rdi ++ pushq !%rax ++ pushq !%rdi
+      ++ addq !%rax !%rdi
+      ++ addq (imm 9) !%rdi
+      ++ call "_my_malloc"
+      ++ movq (imm 3) (ind rax)
+      ++ leaq (ind ~ofs:8 rax) rdi
+      ++ popq rdx ++ popq rcx ++ popq rsi ++ pushq !%rcx ++ pushq !%rdx
+      ++ pushq !%rax
+      ++ leaq (ind ~ofs:8 rsi) rsi
+      ++ call "_my_memcpy" ++ popq rax ++ popq rdx
+      ++ leaq (ind ~ofs:8 ~index:rdx rax) rdi
+      ++ popq rdx ++ popq rsi ++ pushq !%rax
+      ++ leaq (ind ~ofs:8 rsi) rsi
+      ++ call "_my_strcpy" ++ popq rax ++ ret
+    in
+    (codefun ++ code, codemain)
+  in
+  let codefun, codemain = addConcatStrings (codefun, codemain) in
   (codefun, codemain)
 
 let compile_program ?(verbose = false) p ofile =

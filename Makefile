@@ -5,10 +5,16 @@ all:
 clean:
 	dune clean
 
-test: all
+testBoth: all
 	./pyretc -v mainTest.arr
 	@echo "From Pyret : "
 	pyret -q -e none mainTest.arr
+	@echo "From MY COMPILER : "	
+	gcc -no-pie mainTest.s -o mainTest
+	./mainTest
+
+test: all
+	./pyretc -v mainTest.arr
 	@echo "From MY COMPILER : "	
 	gcc -no-pie mainTest.s -o mainTest
 	./mainTest

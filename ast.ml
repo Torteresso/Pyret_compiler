@@ -88,11 +88,7 @@ type frameSize = int [@@deriving show]
 type exprC = { edescC : exprDescC; elocC : loc; mutable etypC : typ option }
 [@@deriving show]
 
-and var =
-  | Vglobal of ident
-  | Vlocal of ident * int
-  | Vclos of ident * int
-  | Varg of ident * int
+and var = Vlocal of ident * int | Vclos of ident * int | Varg of ident * int
 
 and exprDescC =
   | CConst of int
@@ -118,7 +114,7 @@ and stmtC = { sdescC : stmtDescC; slocC : loc; mutable stypC : typ option }
 
 and stmtDescC =
   | CBexpr of bexprC * frameSize
-  | CAffec of ident * bexprC * frameSize
+  | CAffec of var * bexprC * frameSize
   | CDecl of isVar * var * ty option * bexprC * frameSize
   | CFun of ident * ident list option * ty * exprC * int
   | CLetFun of ident * paramC list * blockC * frameSize

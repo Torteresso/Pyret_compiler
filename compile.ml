@@ -405,6 +405,7 @@ and alloc_stmt (env : local_env) (fpcur : int) s =
 
 let alloc p =
   let initialEnv = Smap.add "nothing" (-8) Smap.empty in
+  let initialEnv = Smap.add "empty" (-16) initialEnv in
   let p, _, n =
     List.fold_left
       (fun (l, env, n) s ->
@@ -426,7 +427,7 @@ let getUniqueLabel () =
 let popn n = addq (imm n) !%rsp
 let pushn n = subq (imm n) !%rsp
 
-let rec compile_expr e =
+let rec compile_expr ?(recursivePos = -1) e =
   match e.edescC with
   | CConst i ->
       let code =
@@ -465,7 +466,8 @@ let rec compile_expr e =
           List.fold_left
             (fun (code, n) v ->
               let newCode =
-                movq !%rax !%rcx ++ compile_var v
+                movq !%rax !%rcx
+                ++ compile_var ~recursivePos v
                 ++ movq !%rax (ind ~ofs:(16 + n) rcx)
                 ++ movq !%rcx !%rax
               in
@@ -529,8 +531,9 @@ let rec compile_expr e =
 
       (codeBeBLF ++ codeF ++ codeB2F, codeBEBLM ++ codeB2M ++ label endLabel)
 
-and compile_var = function
-  | Vlocal (i, pos) -> movq (ind ~ofs:pos rbp) !%rax
+and compile_var ?(recursivePos = -1) = function
+  | Vlocal (i, pos) ->
+      if recursivePos = pos then nop else movq (ind ~ofs:pos rbp) !%rax
   | Vclos (i, pos) ->
       movq (ind ~ofs:16 rbp) !%rdx ++ movq (ind ~ofs:pos rdx) !%rax
   | Varg (i, pos) -> movq (ind ~ofs:pos rbp) !%rax
@@ -691,7 +694,7 @@ and compile_stmt (codefun, codemain) s =
       let codeF, codeM = compile_bexpr be in
       (codefun ++ codeF, codemain ++ codeM)
   | CFun (i, _, _, e, pos) ->
-      let codeEF, codeEM = compile_expr e in
+      let codeEF, codeEM = compile_expr ~recursivePos:pos e in
       let code = codeEM ++ movq !%rax (ind ~ofs:pos rbp) in
       (codefun ++ codeEF, codemain ++ code)
   | CLetFun (i, pl, b, fpmax) ->
@@ -721,12 +724,30 @@ let addBuildInVariablesToCode (codefun, codemain) =
     ++ movq (imm 0) (ind rax)
     ++ movq !%rax (ind ~ofs:(-8) rbp)
   in
-  (codefun, nothingCode ++ codemain)
+  let emptyCode =
+    movq (imm 8) !%rdi
+    ++ call "_my_malloc"
+    ++ movq (imm 4) (ind rax)
+    ++ movq !%rax (ind ~ofs:(-16) rbp)
+  in
+  (codefun, nothingCode ++ emptyCode ++ codemain)
 
 let addBuildInFunctionsToP p =
   let unknownPos =
     { pos_fname = "Unknown"; pos_lnum = -1; pos_bol = -1; pos_cnum = -1 }
   in
+  let linkT = Ast.PType ("a", None) in
+  let linkClos =
+    { edescC = CClos ("_link", []); elocC = unknownPos; etypC = None }
+  in
+  let linkFun =
+    {
+      sdescC = CFun ("link", Some [ "a" ], linkT, linkClos, -1);
+      slocC = unknownPos;
+      stypC = None;
+    }
+  in
+
   let numModuloT = Ast.PType ("", None) in
   let numModuloClos =
     { edescC = CClos ("_num_modulo", []); elocC = unknownPos; etypC = None }
@@ -762,9 +783,24 @@ let addBuildInFunctionsToP p =
     }
   in
 
-  numModuloFun :: raiseFun :: printFun :: p
+  linkFun :: numModuloFun :: raiseFun :: printFun :: p
 
 let addBuiltInFunctionsToCode (codefun, codemain) =
+  let addLinkCode (codefun, codemain) =
+    let codeF =
+      label "_link" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ movq (imm 24) !%rdi
+      ++ call "_my_malloc"
+      ++ movq (imm 5) (ind rax)
+      ++ movq (ind ~ofs:24 rbp) !%rdx
+      ++ movq !%rdx (ind ~ofs:8 rax)
+      ++ movq (ind ~ofs:32 rbp) !%rdx
+      ++ movq !%rdx (ind ~ofs:16 rax)
+      ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addLinkCode (codefun, codemain) in
   let addNumModuloCode (codefun, codemain) =
     let codeF =
       label "_num_modulo" ++ pushq !%rbp ++ movq !%rsp !%rbp ++ movq !%rax !%rcx
@@ -804,7 +840,6 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
       ++ cmpq (imm 0) (ind rax)
       ++ jne "_not_nothing"
       ++ movq (ilab ".S_nothing") !%rdi
-      ++ movq (imm 0) !%rax
       ++ call "_my_printf" ++ jmp "_done" ++ label "_not_nothing"
       ++ cmpq (imm 1) (ind rax)
       ++ jne "_not_bool"
@@ -823,9 +858,27 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
       ++ leaq (ind ~ofs:8 rax) rdi
       ++ call "_my_printf" ++ jmp "_done" ++ label "_not_string"
       ++ cmpq (imm 4) (ind rax)
-      ++ jne "_not_empty" ++ jmp "_done" ++ label "_not_empty"
+      ++ jne "_not_empty"
+      ++ movq (ilab ".S_empty") !%rdi
+      ++ call "_my_printf" ++ jmp "_done" ++ label "_not_empty"
       ++ cmpq (imm 5) (ind rax)
-      ++ jne "_not_link" ++ jmp "_done" ++ label "_not_link"
+      ++ jne "_not_link"
+      ++ movq (ilab ".S_listStart") !%rdi
+      ++ call "_my_printf"
+      ++ pushq (ind ~ofs:24 rbp)
+      ++ label "_start_list" ++ popq rax ++ pushq !%rax
+      ++ pushq (ind ~ofs:8 rax)
+      ++ movq (ind ~ofs:16 rbp) !%rbx
+      ++ pushq !%rbx
+      ++ call_star (ind ~ofs:8 rbx)
+      ++ popn 16 ++ popq rax
+      ++ movq (ind ~ofs:16 rax) !%rbx
+      ++ cmpq (imm 4) (ind rbx)
+      ++ je "_end_list" ++ pushq !%rbx
+      ++ movq (ilab ".S_listMiddle") !%rdi
+      ++ call "_my_printf" ++ jmp "_start_list" ++ label "_end_list"
+      ++ movq (ilab ".S_listEnd") !%rdi
+      ++ call "_my_printf" ++ jmp "_done" ++ label "_not_link"
       ++ cmpq (imm 6) (ind rax)
       ++ jne "_not_nothing" ++ label "_done"
       ++ movq (ind ~ofs:24 rbp) !%rax
@@ -951,7 +1004,9 @@ let compile_program ?(verbose = false) p ofile =
         label ".S_print_int" ++ string "%d" ++ label ".S_nothing"
         ++ string "nothing" ++ label ".S_true" ++ string "true"
         ++ label ".S_false" ++ string "false" ++ label ".S_empty"
-        ++ string "empty";
+        ++ string "[list: ]" ++ label ".S_listStart" ++ string "[list: "
+        ++ label ".S_listMiddle" ++ string ", " ++ label ".S_listEnd"
+        ++ string "]";
     }
   in
   let f = open_out ofile in

@@ -9,6 +9,7 @@ doc
 typing
 mainTest*
 out
+a.out
 pyretc
 .ocamlformat
 .pyret

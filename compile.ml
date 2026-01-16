@@ -104,7 +104,7 @@ and findFree_funbody fb =
 
 and findFree_stmt s =
   match s.sdesc with
-  | SFun (_, _, fb) -> (findFree_funbody fb, StringSet.empty)
+  | SFun (i, _, fb) -> (findFree_funbody fb, StringSet.singleton i)
   | SBexpr be -> (findFree_bexpr be, StringSet.empty)
   | SAffec (i, be) | SDecl (_, i, _, be) ->
       (findFree_bexpr be, StringSet.singleton i)
@@ -145,6 +145,7 @@ let rec clos_expr env e =
             (fun s (env, l, n) ->
               let n = n + 8 in
               let vClos = Vclos (s, n) in
+
               let vEnv = Smap.find s env in
               (Smap.add s vClos env, vEnv :: l, n))
             freeVars (env, [], 8)
@@ -239,8 +240,7 @@ and clos_stmt env s =
     match s.sdesc with
     | SBexpr be -> (env, [ CBexpr (clos_bexpr env be, -1) ])
     | SFun (i, il, (pl, t, b)) ->
-        let freeVars, toRemove = findFree_stmt s in
-        let freeVars = StringSet.diff freeVars toRemove in
+        let freeVars, _ = findFree_stmt s in
         let env = Smap.add i (Vlocal (i, -1)) env in
         let envWithClos, vars, _ =
           StringSet.fold

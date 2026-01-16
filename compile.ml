@@ -35,7 +35,7 @@ let rec findFree_expr e =
         List.fold_left
           (fun set beL ->
             List.fold_left
-              (fun s be -> StringSet.union set (findFree_bexpr be))
+              (fun s be -> StringSet.union s (findFree_bexpr be))
               set beL)
           StringSet.empty cl
       in
@@ -83,9 +83,15 @@ and findFree_bexpr be =
   StringSet.union v vL
 
 and findFree_block b =
-  List.fold_left
-    (fun set stmt -> StringSet.union set (findFree_stmt stmt))
-    StringSet.empty b
+  let set, toRemove =
+    List.fold_left
+      (fun (set, toR) stmt ->
+        let newSet, toRemove = findFree_stmt stmt in
+        (StringSet.union set newSet, StringSet.union toR toRemove))
+      (StringSet.empty, StringSet.empty)
+      b
+  in
+  StringSet.diff set toRemove
 
 and findFree_funbody fb =
   let pl, _, b = fb in
@@ -98,10 +104,10 @@ and findFree_funbody fb =
 
 and findFree_stmt s =
   match s.sdesc with
-  | SFun (_, _, fb) -> findFree_funbody fb
-  | SBexpr be -> findFree_bexpr be
-  | SAffec (i, be) -> StringSet.remove i (findFree_bexpr be)
-  | SDecl (_, i, _, be) -> StringSet.remove i (findFree_bexpr be)
+  | SFun (_, _, fb) -> (findFree_funbody fb, StringSet.empty)
+  | SBexpr be -> (findFree_bexpr be, StringSet.empty)
+  | SAffec (i, be) | SDecl (_, i, _, be) ->
+      (findFree_bexpr be, StringSet.singleton i)
 
 (* phase 0 : explicitation des fermetures *)
 
@@ -117,9 +123,7 @@ let getUniqueName () =
 
 let defaultEnv =
   let builtInFunctionNames =
-    [
-      "print"; "empty"; "nothing"; "num-modulo"; "link"; "raise"; "each"; "fold";
-    ]
+    [ "print"; "empty"; "nothing"; "num-modulo"; "link"; "raise" ]
   in
   List.fold_left
     (fun env s -> Smap.add s (Vlocal (s, -1)) env)
@@ -174,6 +178,7 @@ let rec clos_expr env e =
               beLC :: l)
             cl []
         in
+
         CCall (i, Smap.find i env, clC)
     | ECases (t, be, bl) ->
         let beC = clos_bexpr env be in
@@ -186,8 +191,11 @@ let rec clos_expr env e =
                 | Some il ->
                     List.fold_right
                       (fun i (env, l) ->
-                        let v = Vlocal (i, -1) in
-                        (Smap.add i v env, v :: l))
+                        match i with
+                        | "_" -> (env, Vlocal (i, -1) :: l)
+                        | _ ->
+                            let v = Vlocal (i, -1) in
+                            (Smap.add i v env, v :: l))
                       il (env, [])
               in
               let bC = clos_block env b in
@@ -231,7 +239,8 @@ and clos_stmt env s =
     match s.sdesc with
     | SBexpr be -> (env, [ CBexpr (clos_bexpr env be, -1) ])
     | SFun (i, il, (pl, t, b)) ->
-        let freeVars = findFree_stmt s in
+        let freeVars, toRemove = findFree_stmt s in
+        let freeVars = StringSet.diff freeVars toRemove in
         let env = Smap.add i (Vlocal (i, -1)) env in
         let envWithClos, vars, _ =
           StringSet.fold
@@ -336,6 +345,28 @@ let rec alloc_expr (env : local_env) (fpcur : int) (e : exprC) =
         in
         let fpmax = max fpmaxBe (max fpmaxB1 (max fpmaxB2 fpmaxBL)) in
         (CIf (beA, b1A, beBLA, b2A), fpmax)
+    | CCases (t, be, bL) ->
+        let beA, _, fpmaxBe = alloc_bexpr env fpcur be in
+        let blA, fpmaxBl =
+          List.fold_left
+            (fun (l, fp) (i, vl, b) ->
+              let vlA, envVl, fpmaxVl =
+                List.fold_right
+                  (fun v (l, env, fp) ->
+                    match getVarName v with
+                    | "_" -> (v :: l, env, fp)
+                    | _ ->
+                        let fp = fp + 8 in
+                        let env = Smap.add (getVarName v) (-fp) env in
+                        let vA = alloc_var env v in
+                        (vA :: l, env, fp))
+                  vl ([], env, fpcur)
+              in
+              let bA, fpmaxB = alloc_block envVl fpmaxVl b in
+              ((i, vlA, bA) :: l, max fpmaxVl fpmaxB))
+            ([], fpcur) bL
+        in
+        (CCases (t, beA, blA), max fpmaxBe fpmaxBl)
   in
   ({ edescC = newDesc; elocC = e.elocC; etypC = e.etypC }, fpmax)
 
@@ -426,6 +457,13 @@ let getUniqueLabel () =
 
 let popn n = addq (imm n) !%rsp
 let pushn n = subq (imm n) !%rsp
+
+let getLocalVarPos = function
+  | Vlocal (_, pos) -> pos
+  | Vclos (i, _) | Varg (i, _) ->
+      raise
+        (CompilerInternalError
+           ("The variable decleration " ^ i ^ " should be local."))
 
 let rec compile_expr ?(recursivePos = -1) e =
   match e.edescC with
@@ -530,6 +568,49 @@ let rec compile_expr ?(recursivePos = -1) e =
       let codeB2F, codeB2M = compile_block b2 in
 
       (codeBeBLF ++ codeF ++ codeB2F, codeBEBLM ++ codeB2M ++ label endLabel)
+  | CCases (_, be, bL) ->
+      let codefunBe, codemainBe = compile_bexpr be in
+      let emptyLabel = getUniqueLabel () in
+      let linkLabel = getUniqueLabel () in
+      let endLabel = getUniqueLabel () in
+
+      let codefunBl, codemainBl =
+        List.fold_right
+          (fun (i, vl, b) (codeF, codeM) ->
+            let codefunB, codemainB = compile_block b in
+            let code =
+              match i with
+              | "empty" ->
+                  label emptyLabel
+                  ++ cmpq (imm 4) (ind rax)
+                  ++ jne linkLabel ++ codemainB ++ jmp endLabel
+              | "link" ->
+                  let codeV, _ =
+                    List.fold_left
+                      (fun (code, n) v ->
+                        match getVarName v with
+                        | "_" -> (code, n + 8)
+                        | _ ->
+                            let pos = getLocalVarPos v in
+                            ( code
+                              ++ movq (ind ~ofs:n rax) !%rcx
+                              ++ movq !%rcx (ind ~ofs:pos rbp),
+                              n + 8 ))
+                      (nop, 8) vl
+                  in
+                  label linkLabel
+                  ++ cmpq (imm 5) (ind rax)
+                  ++ jne emptyLabel ++ codeV ++ codemainB ++ jmp endLabel
+              | _ ->
+                  raise
+                    (CompilerInternalError
+                       "Others branches than empty or link in cases \
+                        expressions are not yet supported.")
+            in
+            (codeF ++ codefunB, codeM ++ code))
+          bL (codefunBe, codemainBe)
+      in
+      (codefunBl, codemainBl ++ label endLabel)
 
 and compile_var ?(recursivePos = -1) = function
   | Vlocal (i, pos) ->
@@ -542,135 +623,142 @@ and compile_bexpr be =
   let compile_binop op e1 e2 =
     let codeFunE2, codeMainE2 = compile_expr e2 in
     let code =
-      pushq !%rax ++ codeMainE2 ++ popq rbx ++ movq !%rax !%rdx
-      ++ movq !%rbx !%rax ++ movq !%rdx !%rbx
+      let initialCode =
+        match op with
+        | And ->
+            let isFalseLabel = getUniqueLabel () in
+            pushq !%rax
+            ++ cmpq (imm 0) (ind ~ofs:8 rax)
+            ++ je isFalseLabel ++ codeMainE2 ++ label isFalseLabel ++ popq rbx
+            ++ movq !%rax !%rdx ++ movq !%rbx !%rax ++ movq !%rdx !%rbx
+        | Or ->
+            let isTrueLabel = getUniqueLabel () in
+            pushq !%rax
+            ++ cmpq (imm 1) (ind ~ofs:8 rax)
+            ++ je isTrueLabel ++ codeMainE2 ++ label isTrueLabel ++ popq rbx
+            ++ movq !%rax !%rdx ++ movq !%rbx !%rax ++ movq !%rdx !%rbx
+        | _ ->
+            pushq !%rax ++ codeMainE2 ++ popq rbx ++ movq !%rax !%rdx
+            ++ movq !%rbx !%rax ++ movq !%rdx !%rbx
+      in
+      initialCode
       ++
       match op with
       | Add -> (
           match e1.etypC with
           | Some Number ->
-              movq (ind ~ofs:8 rbx) !%rbx ++ addq !%rbx (ind ~ofs:8 rax)
+              movq (ind ~ofs:8 rbx) !%rbx
+              ++ addq (ind ~ofs:8 rax) !%rbx
+              ++ pushq !%rbx
+              ++ movq (imm 16) !%rdi
+              ++ call "_my_malloc"
+              ++ movq (imm 2) (ind rax)
+              ++ popq rbx
+              ++ movq !%rbx (ind ~ofs:8 rax)
           | Some String ->
-              movq !%rax !%rdi ++ movq !%rbx !%rsi ++ call "_concat_strings")
-      | Sub -> movq (ind ~ofs:8 rbx) !%rbx ++ subq !%rbx (ind ~ofs:8 rax)
+              movq !%rax !%rdi ++ movq !%rbx !%rsi ++ call "_concat_strings"
+          | _ ->
+              raise
+                (CompilerInternalError
+                   "+ operator should only operate on intergers or strings"))
+      | Sub ->
+          movq (ind ~ofs:8 rbx) !%rbx
+          ++ movq (ind ~ofs:8 rax) !%rcx
+          ++ subq !%rbx !%rcx ++ pushq !%rcx
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
+          ++ movq (imm 2) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | Mul ->
           movq (ind ~ofs:8 rbx) !%rbx
           ++ imulq (ind ~ofs:8 rax) !%rbx
-          ++ movq !%rbx (ind ~ofs:8 rax)
+          ++ pushq !%rbx
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
+          ++ movq (imm 2) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | Div ->
           movq !%rax !%rcx
           ++ movq (ind ~ofs:8 rbx) !%rbx
           ++ movq (ind ~ofs:8 rax) !%rax
-          ++ cqto ++ idivq !%rbx
-          ++ movq !%rax (ind ~ofs:8 rcx)
-          ++ movq !%rcx !%rax
+          ++ cqto ++ idivq !%rbx ++ pushq !%rax
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
+          ++ movq (imm 2) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | And ->
           movq (ind ~ofs:8 rbx) !%rbx
           ++ andq (ind ~ofs:8 rax) !%rbx
-          ++ movq !%rbx (ind ~ofs:8 rax)
+          ++ pushq !%rbx
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
+          ++ movq (imm 1) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | Or ->
           movq (ind ~ofs:8 rbx) !%rbx
           ++ orq (ind ~ofs:8 rax) !%rbx
-          ++ movq !%rbx (ind ~ofs:8 rax)
+          ++ pushq !%rbx
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
+          ++ movq (imm 1) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | Inf ->
           movq (ind ~ofs:8 rax) !%rax
           ++ cmpq (ind ~ofs:8 rbx) !%rax
-          ++ setl !%al ++ movzbq !%al rax
-          ++ movq !%rax (ind ~ofs:8 rbx)
-          ++ movq !%rbx !%rax
+          ++ setl !%al ++ movzbq !%al rax ++ pushq !%rax
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
           ++ movq (imm 1) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | InfEq ->
           movq (ind ~ofs:8 rax) !%rax
           ++ cmpq (ind ~ofs:8 rbx) !%rax
-          ++ setle !%al ++ movzbq !%al rax
-          ++ movq !%rax (ind ~ofs:8 rbx)
-          ++ movq !%rbx !%rax
+          ++ setle !%al ++ movzbq !%al rax ++ pushq !%rax
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
           ++ movq (imm 1) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | Sup ->
           movq (ind ~ofs:8 rax) !%rax
           ++ cmpq (ind ~ofs:8 rbx) !%rax
-          ++ setg !%al ++ movzbq !%al rax
-          ++ movq !%rax (ind ~ofs:8 rbx)
-          ++ movq !%rbx !%rax
+          ++ setg !%al ++ movzbq !%al rax ++ pushq !%rax
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
           ++ movq (imm 1) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | SupEq ->
           movq (ind ~ofs:8 rax) !%rax
           ++ cmpq (ind ~ofs:8 rbx) !%rax
-          ++ setge !%al ++ movzbq !%al rax
-          ++ movq !%rax (ind ~ofs:8 rbx)
-          ++ movq !%rbx !%rax
+          ++ setge !%al ++ movzbq !%al rax ++ pushq !%rax
+          ++ movq (imm 16) !%rdi
+          ++ call "_my_malloc"
           ++ movq (imm 1) (ind rax)
+          ++ popq rcx
+          ++ movq !%rcx (ind ~ofs:8 rax)
       | Eq ->
-          let eqFalseLab = getUniqueLabel () in
-          let eqTrueLab = getUniqueLabel () in
-          let eqBoolLab = getUniqueLabel () in
-          let eqIntLab = getUniqueLabel () in
-          let eqStringLab = getUniqueLabel () in
-          let eqFinalLab = getUniqueLabel () in
-          movq (ind rax) !%rcx
-          ++ cmpq (ind rbx) !%rcx
-          ++ jne eqFalseLab
-          ++ cmpq (imm 0) !%rcx
-          ++ je eqTrueLab
-          ++ cmpq (imm 1) !%rcx
-          ++ je eqBoolLab
-          ++ cmpq (imm 2) !%rcx
-          ++ je eqIntLab
-          ++ cmpq (imm 3) !%rcx
-          ++ je eqStringLab
-          ++ cmpq (imm 4) !%rcx
-          ++ je eqTrueLab ++ jmp eqFalseLab ++ label eqBoolLab ++ label eqIntLab
-          ++ movq (ind ~ofs:8 rax) !%rax
-          ++ cmpq (ind ~ofs:8 rbx) !%rax
-          ++ sete !%al ++ jmp eqFinalLab ++ label eqStringLab
-          ++ leaq (ind ~ofs:8 rax) rdi
-          ++ leaq (ind ~ofs:8 rbx) rsi
-          ++ call "_my_strcmp" ++ testq !%rax !%rax ++ sete !%al
-          ++ jmp eqFinalLab ++ label eqTrueLab
-          ++ movb (imm 1) !%al
-          ++ jmp eqFinalLab ++ label eqFalseLab
-          ++ movb (imm 0) !%al
-          ++ label eqFinalLab ++ movzbq !%al rax ++ pushq !%rax
+          pushq !%rbx ++ pushq !%rax ++ call "_check_equality" ++ popn 16
+          ++ pushq !%rax
           ++ movq (imm 16) !%rdi
           ++ call "_my_malloc"
           ++ movq (imm 1) (ind rax)
           ++ popq rcx
           ++ movq !%rcx (ind ~ofs:8 rax)
       | Dif ->
-          let eqFalseLab = getUniqueLabel () in
-          let eqTrueLab = getUniqueLabel () in
-          let eqBoolLab = getUniqueLabel () in
-          let eqIntLab = getUniqueLabel () in
-          let eqStringLab = getUniqueLabel () in
-          let eqFinalLab = getUniqueLabel () in
-          movq (ind rax) !%rcx
-          ++ cmpq (ind rbx) !%rcx
-          ++ jne eqTrueLab
-          ++ cmpq (imm 0) !%rcx
-          ++ je eqFalseLab
-          ++ cmpq (imm 1) !%rcx
-          ++ je eqBoolLab
-          ++ cmpq (imm 2) !%rcx
-          ++ je eqIntLab
-          ++ cmpq (imm 3) !%rcx
-          ++ je eqStringLab
-          ++ cmpq (imm 4) !%rcx
-          ++ je eqFalseLab ++ jmp eqTrueLab ++ label eqBoolLab ++ label eqIntLab
-          ++ movq (ind ~ofs:8 rax) !%rax
-          ++ cmpq (ind ~ofs:8 rbx) !%rax
-          ++ setne !%al ++ jmp eqFinalLab ++ label eqStringLab
-          ++ leaq (ind ~ofs:8 rax) rdi
-          ++ leaq (ind ~ofs:8 rbx) rsi
-          ++ call "_my_strcmp" ++ testq !%rax !%rax ++ setne !%al
-          ++ jmp eqFinalLab ++ label eqTrueLab
-          ++ movb (imm 1) !%al
-          ++ jmp eqFinalLab ++ label eqFalseLab
-          ++ movb (imm 0) !%al
-          ++ label eqFinalLab ++ movzbq !%al rax ++ pushq !%rax
+          pushq !%rbx ++ pushq !%rax ++ call "_check_equality" ++ popn 16
+          ++ pushq !%rax
           ++ movq (imm 16) !%rdi
           ++ call "_my_malloc"
           ++ movq (imm 1) (ind rax)
           ++ popq rcx
+          ++ xorq (imm 1) !%rcx
           ++ movq !%rcx (ind ~ofs:8 rax)
     in
     (codeFunE2, code)
@@ -705,14 +793,7 @@ and compile_stmt (codefun, codemain) s =
       in
       (code ++ codefun ++ codeBFun, codemain)
   | CDecl (_, v, _, be, fpmax) | CAffec (v, be, fpmax) ->
-      let pos =
-        match v with
-        | Vlocal (_, pos) -> pos
-        | Vclos (i, _) | Varg (i, _) ->
-            raise
-              (CompilerInternalError
-                 ("The variable decleration " ^ i ^ " should be local."))
-      in
+      let pos = getLocalVarPos v in
       let codeBEF, codeBEM = compile_bexpr be in
       let code = codeBEM ++ movq !%rax (ind ~ofs:pos rbp) in
       (codefun ++ codeBEF, codemain ++ code)
@@ -732,10 +813,13 @@ let addBuildInVariablesToCode (codefun, codemain) =
   in
   (codefun, nothingCode ++ emptyCode ++ codemain)
 
+let addInitialFunctionToP p = BuiltIn.each :: BuiltIn.fold :: p
+
 let addBuildInFunctionsToP p =
   let unknownPos =
     { pos_fname = "Unknown"; pos_lnum = -1; pos_bol = -1; pos_cnum = -1 }
   in
+
   let linkT = Ast.PType ("a", None) in
   let linkClos =
     { edescC = CClos ("_link", []); elocC = unknownPos; etypC = None }
@@ -786,6 +870,64 @@ let addBuildInFunctionsToP p =
   linkFun :: numModuloFun :: raiseFun :: printFun :: p
 
 let addBuiltInFunctionsToCode (codefun, codemain) =
+  let addCheckEqualityCode (codefun, codemain) =
+    let codeF =
+      let eqFalseLab = getUniqueLabel () in
+      let eqTrueLab = getUniqueLabel () in
+      let eqBoolLab = getUniqueLabel () in
+      let eqIntLab = getUniqueLabel () in
+      let eqStringLab = getUniqueLabel () in
+      let eqFinalLab = getUniqueLabel () in
+      let isNotComparable = getUniqueLabel () in
+      label "_check_equality" ++ pushq !%rbp ++ movq !%rsp !%rbp
+      ++ movq (ind ~ofs:16 rbp) !%rax
+      ++ movq (ind ~ofs:24 rbp) !%rbx
+      ++ movq (ind rax) !%rcx
+      ++ cmpq (ind rbx) !%rcx
+      ++ jne eqFalseLab
+      ++ cmpq (imm 0) !%rcx
+      ++ je eqTrueLab
+      ++ cmpq (imm 1) !%rcx
+      ++ je eqBoolLab
+      ++ cmpq (imm 2) !%rcx
+      ++ je eqIntLab
+      ++ cmpq (imm 3) !%rcx
+      ++ je eqStringLab
+      ++ cmpq (imm 4) !%rcx
+      ++ je eqTrueLab
+      ++ cmpq (imm 5) !%rcx
+      ++ jne isNotComparable ++ pushq !%rbx ++ pushq !%rax
+      ++ pushq (ind ~ofs:8 rbx)
+      ++ pushq (ind ~ofs:8 rax)
+      ++ call "_check_equality" ++ popn 16
+      ++ cmpq (imm 0) !%rax
+      ++ popq rax ++ popq rbx ++ je eqFalseLab ++ pushq !%rbx ++ pushq !%rax
+      ++ pushq (ind ~ofs:16 rbx)
+      ++ pushq (ind ~ofs:16 rax)
+      ++ call "_check_equality" ++ popn 16
+      ++ cmpq (imm 0) !%rax
+      ++ popq rax ++ popq rbx ++ je eqFalseLab ++ jmp eqTrueLab
+      ++ label eqBoolLab ++ label eqIntLab
+      ++ movq (ind ~ofs:8 rax) !%rax
+      ++ cmpq (ind ~ofs:8 rbx) !%rax
+      ++ sete !%al ++ jmp eqFinalLab ++ label isNotComparable
+      ++ movq (ilab ".S_non_comparable") !%rdi
+      ++ call "_my_printf"
+      ++ movq (imm 1) !%rax
+      ++ movq (imm 1) !%rdi
+      ++ call "exit" ++ label eqStringLab
+      ++ leaq (ind ~ofs:8 rax) rdi
+      ++ leaq (ind ~ofs:8 rbx) rsi
+      ++ call "_my_strcmp" ++ testq !%rax !%rax ++ sete !%al ++ jmp eqFinalLab
+      ++ label eqTrueLab
+      ++ movb (imm 1) !%al
+      ++ jmp eqFinalLab ++ label eqFalseLab
+      ++ movb (imm 0) !%al
+      ++ label eqFinalLab ++ movzbq !%al rax ++ popq rbp ++ ret
+    in
+    (codefun ++ codeF, codemain)
+  in
+  let codefun, codemain = addCheckEqualityCode (codefun, codemain) in
   let addLinkCode (codefun, codemain) =
     let codeF =
       label "_link" ++ pushq !%rbp ++ movq !%rsp !%rbp
@@ -981,6 +1123,7 @@ let addBuiltInFunctionsToCode (codefun, codemain) =
   (codefun, codemain)
 
 let compile_program ?(verbose = false) p ofile =
+  let p = addInitialFunctionToP p in
   let p = clos_prog p in
   if verbose then print_endline "CLOSURE DONE";
   let p = addBuildInFunctionsToP p in
@@ -1006,7 +1149,8 @@ let compile_program ?(verbose = false) p ofile =
         ++ label ".S_false" ++ string "false" ++ label ".S_empty"
         ++ string "[list: ]" ++ label ".S_listStart" ++ string "[list: "
         ++ label ".S_listMiddle" ++ string ", " ++ label ".S_listEnd"
-        ++ string "]";
+        ++ string "]" ++ label ".S_non_comparable"
+        ++ string "Attempted to compare two incomparable values.\n";
     }
   in
   let f = open_out ofile in

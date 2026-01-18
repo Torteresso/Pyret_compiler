@@ -3,7 +3,7 @@ all:
 	@mv pyretc.exe pyretc
 
 clean:
-	dune clean
+	dune clean && rm ./pyretc
 
 testBoth: all
 	./pyretc -v mainTest.arr

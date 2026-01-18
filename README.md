@@ -1,9 +1,4 @@
-A compiler for the [pyret language](https://pyret.org/).
-
-⚠️ Under construction
-=====
-
-State : working lexer, parser and typer.
+A compiler for a subset of the [pyret language](https://pyret.org/).
 
 Usage
 =====
@@ -17,7 +12,14 @@ make
 # Command explanations :
 ./pyretc --help
 
-# Example : to parse a main.arr file :
+# Example : to parse a file.arr file :
 ./pyretc --parse-only main.arr
 
-r``
+# To compile a file.arr file to assembly : 
+./pyretc file.arr
+
+# To execute the compiled program :
+
+gcc -no-pie file.s -o file && ./file
+
+``

@@ -19,7 +19,4 @@ make
 ./pyretc file.arr
 
 # To execute the compiled program :
-
 gcc -no-pie file.s -o file && ./file
-
-``
